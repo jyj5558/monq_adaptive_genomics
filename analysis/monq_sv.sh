@@ -25,7 +25,8 @@ module load htslib
 cd ${MCPAN}/called/sv/vg
 CALLED=/scratch/bell/jeon96/monq/pan/called/sv/vg/
 
-# Compressing and indexing each vcf file first
+# Preprocessing
+## Compressing and indexing each vcf file first
 for id in `ls -lrt ${CALLED}/chr1 | tr -s ' ' | cut -d ' ' -f 9 | cut -d '_' -f 1 | sort | uniq`; do
   #id=$(echo $i | cut -d '_' -f 1)
   gunzip ${id}_concat_mcSV.vcf.gz 
@@ -36,10 +37,10 @@ for id in `ls -lrt ${CALLED}/chr1 | tr -s ' ' | cut -d ' ' -f 9 | cut -d '_' -f 
   rm ${id}_mcSV_temp.vcf
 done
 
-# Combining separately called SV vcf files
+## Combining separately called SV vcf files
 bcftools merge -m all -Oz -o monq_mcSV.merged.vcf.gz --threads ${N} *_mcSV.sorted.vcf.gz 
 
-# Filtering with population-level parameters
+## Filtering with population-level parameters
 vcftools --gzvcf monq_mcSV.merged.vcf.gz --missing-indv 
 vcftools --gzvcf monq_mcSV.merged.vcf.gz --missing-site
 vcftools --gzvcf monq_mcSV.merged.vcf.gz --depth
@@ -48,7 +49,7 @@ vcftools --gzvcf monq_mcSV.merged.vcf.gz --site-quality
 cat out.lmiss | awk '!/CHR/' | awk '$6 > 0.2' | cut -f1,2 >> badloci
 bcftools stats monq_mcSV.merged.vcf.gz > vcf-stats.txt
 
-# In R, plotting and summarizing vcf stats
+## In R, plotting and summarizing vcf stats
 module load r
 
 R
@@ -435,7 +436,7 @@ module load anaconda
 module load use.own
 module load conda-env/mypackages-py3.9.13 # Negishi
 
-# Normalizing outlier SVs
+## Normalizing outlier SVs
 sed 's/ref_p#0#//g' ${MCPAN}/monq-out_refp.fa > ${MCPAN}/monq-out_refp_renamed.fa
 samtools faidx ${MCPAN}/monq-out_refp_renamed.fa > ${MCPAN}/monq-out_refp_renamed.fa.fai
 
@@ -495,7 +496,7 @@ wget https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/016/699/485/GCF_016699485.2_bG
 gunzip GCF_001577835.2_Coturnix_japonica_2.1_gene_ontology.gaf.gz
 gunzip GCF_016699485.2_gene_ontology.gaf.gz 
 
-# Preparation for GO enrichment analysis
+## Preparation for GO enrichment analysis
 cd ${GEAGO}
 bcftools norm -f ${MCPAN}/monq-out_refp_renamed.fa -Oz -o monq_SVoutliers.norm.vcf.gz monq_SVoutliers_final.vcf
 tabix -p vcf monq_SVoutliers.norm.vcf.gz
@@ -579,17 +580,17 @@ cat "$GAF_QUAIL" "$GAF_CHICKEN" \
   | sort -u > gene2go.raw.tsv # Merge the two GAFs and extract a 2-column gene→GO table
 cp gene2go.raw.tsv gene2go.tsv
 
-# collapse multiple GO terms per GeneID into a single semicolon-separated list
+### collapse multiple GO terms per GeneID into a single semicolon-separated list
 awk '{go[$1]=(go[$1]?go[$1]";":"")$2} END{for(k in go) print k"\t"go[k]}' \
   gene2go.tsv | sort -u > geneid_to_golist.tsv
 
-# append GO list to the genes.bed (as column 7)
+### append GO list to the genes.bed (as column 7)
 awk 'BEGIN{FS=OFS="\t"} NR==FNR{golist[$1]=$2; next}
      { print $0, ( ($4 in golist) ? golist[$4] : "." ) }' \
      geneid_to_golist.tsv genes.bed \
 | bedtools sort -i - > genes_with_GO.bed
 
-# append gene length
+### append gene length
 awk 'BEGIN{FS=OFS="\t"}
   NR==FNR {
     L = $3 - $2;                           # end - start
@@ -606,7 +607,7 @@ awk 'BEGIN{FS=OFS="\t"}
 bedtools intersect -wa -wb -a SVoutliers_sorted.merged.bed -b genes_with_GO.bed > SVoutlier_gene_hits.tsv 
 bedtools intersect -wa -wb -a SVall_sorted.merged.bed -b genes_with_GO.bed > SVall_gene_hits.tsv
 
-# Preparation for KEGG pathway enrichiment analysis
+## Preparation for KEGG pathway enrichiment analysis
 curl -s 'https://rest.kegg.jp/link/pathway/cjo'  > cjo_gene2path.tsv
 curl -s 'https://rest.kegg.jp/list/pathway/cjo'  > cjo_pathnames.tsv
 curl -s 'https://rest.kegg.jp/link/pathway/gga'  > gga_gene2path.tsv
@@ -617,19 +618,20 @@ cat cjo_pathnames.tsv gga_pathnames.tsv > ko_pathnames.tsv
 awk 'BEGIN{FS=OFS="\t"} $1=="chr30"{print $4}' genes.bed | sort -u > chickenW.ids
 awk 'BEGIN{FS=OFS="\t"} $1!="chr30"{print $4}' genes.bed | sort -u > quail.ids
 
-# Build quail gene ➜ KEGG pathway
+### Build quail gene ➜ KEGG pathway
 awk 'NR==FNR{Q[$1]=1; next}
      {split($1,a,":"); if(a[1]=="cjo" && a[2] in Q) print a[2]"\t"$2}' \
     quail.ids cjo_gene2path.tsv \
   | sort -u > gene2path_quail.tsv
 
-# Build chicken-W gene ➜ KEGG pathway
+### Build chicken-W gene ➜ KEGG pathway
 awk 'NR==FNR{W[$1]=1; next}
      {split($1,a,":"); if(a[1]=="gga" && a[2] in W) print a[2]"\t"$2}' \
     chickenW.ids gga_gene2path.tsv \
   | sort -u > gene2path_chickenW.tsv
 
 cat gene2path_quail.tsv gene2path_chickenW.tsv | sort -u > gene2path_merged.tsv
+
 
 # Gene ontology enrichment
 R
@@ -650,48 +652,48 @@ colnames(gene_info) <- c("GeneID", "GeneGo", "length")
 head(gene_info)
 row.names(gene_info) <- gene_info$GeneID
 
-# split the GO terms
+## split the GO terms
 go_split = cSplit(gene_info, "GeneGo", sep = ";", type.convert=FALSE)
 #go_split$contig <- gene_info$GeneID
 head(go_split[,1:10])
 
-# linearize the matrix
+## linearize the matrix
 terms = colnames(select(go_split, contains("GeneGo")))
 go_long = melt(go_split, measure.vars = terms, id.vars = "GeneID", na.rm = TRUE)
 head(go_long)
 go_ready = as.data.frame(go_long[, c(1, 3)])
 head(go_ready)
 
-# upload genes intersecting with all SVs
+## upload genes intersecting with all SVs
 all_genes <- read.table("SVall_gene_hits.tsv", header = F)
 colnames(all_genes)[9] <- "GeneID"
 dim(all_genes) # how many?
 head(all_genes)
 
-# add size info
+## add size info
 all_genes <- left_join(all_genes, gene_info[, c(1,3)])
 dim(all_genes)
 head(all_genes)
 
-# make unique
+## make unique
 all_genes_unique <- all_genes %>% distinct(GeneID, .keep_all = TRUE)
 dim(all_genes_unique) # see the matrix has reduced...
 # and we need to name the rows b gene names for goseq...
 row.names(all_genes_unique) <- all_genes_unique$GeneID
 head(all_genes_unique)
 
-# genes in outliers
+## genes in outliers
 outliers_genes <- read.table("SVoutlier_gene_hits.tsv", header=F)
 colnames(outliers_genes)[9] <- "GeneID"
 head(outliers_genes)
 dim(outliers_genes)
 
-# add a column to the matrix with all the genes indicating whether this gene is found or not inside the outliers list. this will be a 0/1 vector
+## add a column to the matrix with all the genes indicating whether this gene is found or not inside the outliers list. this will be a 0/1 vector
 all_genes_unique$outliers_genes <- as.numeric(all_genes_unique$GeneID %in% outliers_genes$GeneID)
 head(all_genes_unique)
 all_genes_unique_valid <- subset(all_genes_unique, !is.na(length)) 
 
-# prepare the data and integrate length bias for nullp. It requires vectors so here we go transforming data
+## prepare the data and integrate length bias for nullp. It requires vectors so here we go transforming data
 measured_genes_v = as.vector(all_genes_unique_valid$GeneID)
 outliers_genes_v = setNames(as.integer(all_genes_unique_valid$outliers_genes), all_genes_unique_valid$GeneID)
 length_v = setNames(as.numeric(all_genes_unique_valid$length), all_genes_unique_valid$GeneID)
@@ -699,16 +701,16 @@ pwf_outliers = nullp(outliers_genes_v, bias.data = length_v)
 row.names(pwf_outliers) <- row.names(all_genes_unique_valid)
 head(pwf_outliers)
 
-# test enrichment using our database
+## test enrichment using our database
 enrich_outliers = goseq(pwf_outliers, gene2cat = go_ready, use_genes_without_cat = TRUE)
 head(enrich_outliers)
 
-# correct for multiple testing with Benjamini & Hochberg correction
+## correct for multiple testing with Benjamini & Hochberg correction
 enrich_outliers$over_represented_padjust <- p.adjust(enrich_outliers$over_represented_pvalue, method = "BH")
 head(enrich_outliers)
 write.table(enrich_outliers, "GO_enrichment_SVoutliers.txt", sep="\t")
 
-# see only the the significant enrichments
+## see only the the significant enrichments
 enrich_outliers[which(enrich_outliers$over_represented_padjust < 0.10), ] # nothing
 
 subset(enrich_outliers, over_represented_pvalue < 0.01)
@@ -740,17 +742,18 @@ lapply(hits, function(go) intersect(cat2genes[[go]], go_genes))
 #[[3]]
 #[1] "107318197" "107313813" "107322881" "107314654" # TULP3, WDR19, IFT52, ABCC8
 
+
 # KEGG pathway enrichment analysis
-# universe = the exact gene IDs used in your GOseq vectors
+## universe = the exact gene IDs used in your GOseq vectors
 universe_ids <- names(length_v)
 
-# read merged mapping (two columns: gene_id, path_id)
+## read merged mapping (two columns: gene_id, path_id)
 g2p <- fread("gene2path_merged.tsv", col.names = c("gene_id","path"))
 
-# keep only universe genes
+## keep only universe genes
 g2p_universe <- g2p[gene_id %in% universe_ids]
 
-# drop duplicates
+## drop duplicates
 kegg_ready <- unique(g2p_universe)
 
 fwrite(kegg_ready, "gene2path_merged.universe.tsv", sep = "\t", col.names = FALSE)
@@ -763,10 +766,10 @@ enrich_kegg$over_represented_padjust <- p.adjust(enrich_kegg$over_represented_pv
 head(enrich_kegg)
 write.table(enrich_kegg, "KEGG_enrichment_SVoutliers.txt", sep="\t")
 
-# see only the the significant enrichments
+## see only the the significant enrichments
 enrich_kegg[which(enrich_kegg$over_represented_padjust < 0.10), ] # nothing
 
-# Optional: pretty names for pathways (KO-based or gga-based both OK)
+## Optional: pretty names for pathways (KO-based or gga-based both OK)
 paths <- fread("ko_pathnames.tsv", col.names=c("path","term")) 
 enrich_kegg$category <- sub("^path:", "", enrich_kegg$category)
 enrich_kegg <- merge(enrich_kegg, paths, by.x="category", by.y="path", all.x = TRUE)
@@ -816,7 +819,7 @@ library(pcadapt)
 library(vegan)
 library(ggrepel)
 
-# All SVs
+## All SVs
 obj.vcfR <- read.vcfR("monq_mcSV.final.sort.vcf")
 geno <- extract.gt(obj.vcfR) # extract and format genotype matrix
 
@@ -829,7 +832,7 @@ missing_ind <- colMeans(is.na(G))
 missing_loci <- rowMeans(is.na(G))
 G_clean <- G[missing_loci < 0.1, missing_ind < 0.2] # exclude "F1856", "F1913"
 
-# PCAdapt -> missing data handled on the fly
+### PCAdapt -> missing data handled on the fly
 G_pca <- read.pcadapt(G_clean, type = "pcadapt")
 G_pca[is.na(G_pca)] <- 9
 x <- pcadapt(input = G_pca, K = 20, pca.only = TRUE) 
@@ -865,7 +868,7 @@ ggplot(pca_df, aes(x = X2, y = X3, color = lat_long_color)) +
   theme(legend.position = "none")
 dev.off()
 
-# outlier SVs
+## outlier SVs
 obj.vcfR <- read.vcfR("monq_SVoutliers_final.vcf")
 geno <- extract.gt(obj.vcfR) # extract and format genotype matrix
 
@@ -878,7 +881,7 @@ missing_ind <- colMeans(is.na(G))
 missing_loci <- rowMeans(is.na(G))
 G_clean <- G[missing_loci < 0.1, missing_ind < 0.2] # exclude "F1856", "F1913"
 
-# PCAdapt -> missing data handled on the fly
+### PCAdapt -> missing data handled on the fly
 G_pca <- read.pcadapt(G_clean, type = "pcadapt")
 G_pca[is.na(G_pca)] <- 9
 x <- pcadapt(input = G_pca, K = 20, pca.only = TRUE) 
@@ -998,7 +1001,7 @@ dev.off()
 # New Mexico samples from NCBI
 cd ${MCPAN}/called/sv/vg/new_mexico
 
-# Compressing and indexing each vcf file first
+## Compressing and indexing each vcf file first
 for i in `ls -lrt /scratch/bell/jeon96/monq/short-read/sra/fixed/ | tr -s ' ' | cut -d ' ' -f 9 | cut -d '_' -f 1 | sort | uniq`; do
   #id=$(echo $i | cut -d '_' -f 1)
   gunzip ${i}_concat_mcSV.vcf.gz 
@@ -1009,11 +1012,11 @@ for i in `ls -lrt /scratch/bell/jeon96/monq/short-read/sra/fixed/ | tr -s ' ' | 
   rm ${i}_mcSV_temp.vcf
 done
 
-# Combining separately called SV vcf files
+## Combining separately called SV vcf files
 #bcftools merge -m all -Oz -o monqNM_mcSV.merged.vcf.gz --threads ${N} *_mcSV.sorted.vcf.gz 
 bcftools merge -m all -Oz -o monq_mcSV_wNM.merged.vcf.gz --threads ${N} *_mcSV.sorted.vcf.gz 
 
-# Filtering vcf file based on the determined conservative cut-off values from above results                                                                      
+## Filtering vcf file based on the determined conservative cut-off values from above results                                                                      
 vcftools --gzvcf monq_mcSV_wNM.merged.vcf.gz --out monq_mcSV_wNM.filtered --minQ 20 --mac 2 --recode --recode-INFO-all #--remove-filtered lowad --max-meanDP 15 
 bcftools sort monq_mcSV_wNM.filtered.recode.vcf -Oz -o monq_mcSV_wNM.filtered.sorted.vcf.gz
 ${APP}/vcfbub --input monq_mcSV_wNM.filtered.sorted.vcf.gz --max-allele-length 100000 --max-level 0 > monq_mcSV_wNM.filt.sort.popped.vcf.gz # remove large (>100 kb) alleles in graphs. This removes all non-top-level bubbles from the VCF unless they were nested inside a top-level bubble with a reference length exceeding 100 kb; that is, top-level bubbles longer than that are replaced by their child nodes in the snarl tree.
