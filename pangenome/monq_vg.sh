@@ -46,6 +46,7 @@ ${APP}/vg convert -t ${N} -f monq-out_mod_chopped_new_L.xg > monq-out_mod_choppe
 ${APP}/vg gbwt --progress --num-threads ${N} -d ./tmp --gbz-format -g monq-out_mod_chopped.gbz -G monq-out_mod_chopped.gfa 
 ${APP}/vg index --progress -t ${N} -b ./tmp -j monq-out_mod_chopped.dist monq-out_mod_chopped.gfa 
 ${APP}/vg minimizer --progress -t ${N} -d monq-out_mod_chopped.dist -o monq-out_mod_chopped.min monq-out_mod_chopped.gbz 
+
  
 # Mapping short reads
 cd ./aligned/ 
@@ -63,6 +64,7 @@ done
 
 export TMPDIR=/scratch/bell/jeon96/monq/pan/aligned/tmp 
 
+
 # Sorting individual gams
 for i in `ls -lrt ${CLEAN_SRA} | tr -s ' ' | cut -d ' ' -f 9 | cut -d 'R' -f 1 | sort | uniq`; do
   id=$(echo $i | cut -d '_' -f 1)
@@ -76,6 +78,7 @@ done
 
 ${APP}/vg paths -M -x ${MCPAN}/monq-out_mod_chopped_new_L.xg | grep "ref_p" | cut -f 1 | sort -V > chr_list.txt
 
+
 # Chunking individual gams for each chromosome
 for i in `ls -lrt ${CLEAN_SRA} | tr -s ' ' | cut -d ' ' -f 9 | cut -d 'R' -f 1 | sort | uniq`; do
   id=$(echo $i | cut -d '_' -f 1)
@@ -87,6 +90,7 @@ for i in `ls -lrt ${CLEAN_SRA} | tr -s ' ' | cut -d ' ' -f 9 | cut -d 'R' -f 1 |
   cd ../
 done
 #${APP}/vg chunk -t ${N} -P chr_list.txt -c 9999999 -O pg -g -x ${MCPAN}/monq-out_mod_chopped_new_L.xg -a combined_filt_sorted.gam
+
 
 # Augmenting each chromosome graph using an individual-combined gam
 cd ../
@@ -121,6 +125,7 @@ done
 #    mv tmp_aug.pg running_aug.pg
 #done
 
+
 # Indexing the augmented graph 
 for i in {1..30}; do
   cd ./chr${i}
@@ -143,6 +148,7 @@ for i in {1..30}; do
   cd ../
 done
 
+
 # Computing pangenome stats
 for i in {1..30}; do
   cd ./chr${i}
@@ -150,7 +156,8 @@ for i in {1..30}; do
   cd ../
 done
 
-## Mapping short reads to the augmented graphs - vg map takes too long; goes with vg giraffe and per-sample, per-chromosome version in stadby queue
+
+# Mapping short reads to the augmented graphs - vg map takes too long; goes with vg giraffe and per-sample, per-chromosome version in stadby queue
 cd ../aligned/ 
 for i in {1..30}; do
   for j in `ls -lrt ${CLEAN_SRA} | tr -s ' ' | cut -d ' ' -f 9 | cut -d 'R' -f 1 | sort | uniq`; do
@@ -164,6 +171,7 @@ for i in {1..30}; do
   ${APP}/vg filter -t ${N} ./chr${i}/${id}_aln_aug_chr${i}.gam -r 0.90 -fu -m 1 -q 30 -D 999 --proper-pairs -x ../augmented/chr${i}/monq_chr${i}_aug_chopped_L.xg > ./chr${i}/${id}_aln_aug_chr${i}.filt.gam
   done
 done
+
 
 # Indexing the augmented graph (whole-genome version; not working due to oom)
 #${APP}/vg mod -t ${N} -X 256 monq_merged_aug.pg > monq_merged_aug_chopped.pg
@@ -361,7 +369,7 @@ for i in `ls -lrt ${CALLED} | tr -s ' ' | cut -d ' ' -f 9 | grep "vcf.gz.tbi" | 
   bcftools index ${id}_concat_mcSNP.vcf.gz --threads ${N}
 done
 
-# Compressing and indexing each vcf file first
+## Compressing and indexing each vcf file first
 for i in `ls -lrt ${CALLED} | tr -s ' ' | cut -d ' ' -f 9 | grep "vcf.gz.tbi" | sort | uniq`; do
   id=$(echo $i | cut -d '_' -f 1)
   gunzip ${id}_concat_mcSNP.vcf.gz 
@@ -372,8 +380,9 @@ for i in `ls -lrt ${CALLED} | tr -s ' ' | cut -d ' ' -f 9 | grep "vcf.gz.tbi" | 
   rm ${id}_mcSNP_temp.vcf
 done
 
-# Combining separately called SNP vcf files
+## Combining separately called SNP vcf files
 bcftools merge -m all -Oz -o monq_mcSNP.merged.vcf.gz --threads ${N} *_mcSNP.sorted.vcf.gz 
+
 
 # Filtering with population-level parameters
 vcftools --gzvcf monq_mcSNP.merged.vcf.gz --missing-indv 
@@ -398,7 +407,6 @@ summary(var_qual$qual)
 #     Min. 1st Qu.  Median    Mean 3rd Qu.    Max.
 #    30.0   108.6   182.6   229.2   293.0 99318.1
 
-   
 var_depth <- read_delim("./out.ldepth.mean", delim = "\t", col_names = c("chr", "pos", "mean_depth", "var_depth"), skip = 1)
 a <- ggplot(var_depth, aes(mean_depth)) + geom_density(fill = "dodgerblue1", colour = "black", alpha = 0.3)
 a + theme_light()   
@@ -598,7 +606,7 @@ for id in SRR11514058 SRR11514059 SRR11514060 SRR11514061 SRR11514063 SRR1151406
   bcftools index ${id}_concat_mcSNP.vcf.gz --threads ${N}
 done
 
-# Compressing and indexing each vcf file first
+## Compressing and indexing each vcf file first
 for id in SRR11514058 SRR11514059 SRR11514060 SRR11514061 SRR11514063 SRR11514064 SRR11514065; do
   gunzip ${id}_concat_mcSNP.vcf.gz 
   sed 's/ref_p#0#//g' ${id}_concat_mcSNP.vcf > ${id}_mcSNP_temp.vcf # polish the header line to be compatible with bcftools
@@ -608,10 +616,10 @@ for id in SRR11514058 SRR11514059 SRR11514060 SRR11514061 SRR11514063 SRR1151406
   rm ${id}_mcSNP_temp.vcf
 done
 
-# Combining separately called SNP vcf files of NM only
+## Combining separately called SNP vcf files of NM only
 bcftools merge -m all -Oz -o monqNM_mcSNP.merged.vcf.gz --threads ${N} SRR*_mcSNP.sorted.vcf.gz 
 
-# Filtering with population-level parameters
+## Filtering with population-level parameters
 vcftools --gzvcf monqNM_mcSNP.merged.vcf.gz --missing-indv 
 vcftools --gzvcf monqNM_mcSNP.merged.vcf.gz --missing-site
 vcftools --gzvcf monqNM_mcSNP.merged.vcf.gz --depth
@@ -634,7 +642,6 @@ summary(var_qual$qual)
 #     Min. 1st Qu.  Median    Mean 3rd Qu.    Max.
 #    30.0   108.6   182.6   229.2   293.0 99318.1
 
-   
 var_depth <- read_delim("./out.ldepth.mean", delim = "\t", col_names = c("chr", "pos", "mean_depth", "var_depth"), skip = 1)
 a <- ggplot(var_depth, aes(mean_depth)) + geom_density(fill = "dodgerblue1", colour = "black", alpha = 0.3)
 a + theme_light()   
@@ -681,7 +688,6 @@ bcftools sort monqNM_mcSNP.decomp.vcf -Oz -o monqNM_mcSNP.decomp.sort.vcf.gz
 bcftools index monqNM_mcSNP.decomp.sort.vcf.gz
 bcftools view -R vcf_regions.txt monqNM_mcSNP.decomp.sort.vcf.gz -Oz -o monqNM_mcSNP.subset.vcf.gz # make compatible with the main vcf 
 
-
 # Combining separately called SNP vcf files again for all individuals including NM and of this study
 #bcftools merge -m all -Oz -o monqNM_mcSV.merged.vcf.gz --threads ${N} *_mcSV.sorted.vcf.gz 
 bcftools merge -m all -Oz -o monq_mcSNP_wNM.merged.vcf.gz --threads ${N} *_mcSNP.sorted.vcf.gz 
@@ -703,7 +709,7 @@ ml ensembl-vep
 
 cd ${MCPAN}/called/
 
-# Generating dummy vcf and fasta files
+## Generating dummy vcf and fasta files
 #bcftools view -Ov -o monq_mcSV_wNM.subset.vcf monq_mcSV_wNM.subset.vcf.gz
 tabix -p vcf monq_mcSNP_wNM.subset.vcf.gz # make sure the files were moved in the directory
 tabix -p vcf monq_mcSV_wNM.subset.vcf.gz # make sure the files were moved in the directory
@@ -738,7 +744,7 @@ python3 ${APP}/add_T_at_segment_ends.py dummy_fasta_forSLiM.fa dummy_fasta_forSL
 cat dummy_fasta_withT_forSlim.fa | grep -v ">" | grep "A" | wc -l
 cat dummy_fasta_withT_forSlim.fa | grep -v ">" | grep "G" | wc -l
 
-# Subsetting by samples to use in SLiM
+## Subsetting by samples to use in SLiM
 bgzip monq_mcSNPSV_wNM_dummy3.vcf
 tabix monq_mcSNPSV_wNM_dummy3.vcf.gz
 bcftools view -s E9067,E9570,F1306,F1953,F1930,F1933,F1934,F1955,F1957,F1958 -Oz -o monqCTX_mcSNPSV_forSlim.vcf.gz monq_mcSNPSV_wNM_dummy3.vcf.gz # C TX
@@ -758,7 +764,7 @@ bcftools merge -m all monqCTX_mcSNPSV_forSlim.cleaned.vcf.gz monqNM_mcSNPSV_forS
 cp monq*_mcSNPSV_forSlim.vcf ../../slim/
 cp dummy_fasta_withT_forSlim.fa ../../slim/
 
-# Subsetting by samples to estimate genetic load to use in SLiM
+## Subsetting by samples to estimate genetic load to use in SLiM
 bcftools sort -Oz -o monq_mcSNPSV_wNM.subset.sorted.vcf.gz monq_mcSNPSV_wNM.subset.vcf.gz
 tabix -f -p vcf monq_mcSNPSV_wNM.subset.sorted.vcf.gz
 
@@ -766,7 +772,7 @@ tabix -f -p vcf monq_mcSNPSV_wNM.subset.sorted.vcf.gz
 #bcftools view -s F1876,F1878,F1879,F1882,F1916,F1819,F1825,F1827,F1828,F1832,F1833,F1835,F1910 -Ov -o monqSEMX_mcSNPSV_forVEP.vcf monq_mcSNPSV_wNM.subset.sorted.vcf.gz
 #bcftools view -s SRR11514058,SRR11514059,SRR11514060,SRR11514061,SRR11514063,SRR11514064,SRR11514065 -Ov -o monqNM_mcSNPSV_forVEP.vcf monq_mcSNPSV_wNM.subset.sorted.vcf.gz
 
-# prep gff
+## prep gff
 sed 's/\r$//' ${MCPAN}/jaqu_plus_chicChW_renamed.gff > tmp.clean.gff
 grep '^#' tmp.clean.gff > header.txt
 grep -v '^#' tmp.clean.gff | \
@@ -793,6 +799,7 @@ vep --input_file monq_SVoutliers_wNM.subset.vcf.gz --vcf --output_file monq_SVou
 #    --everything --variant_class --species custom --assembly custom --fork ${N} --allow_non_variant
 #vep --input_file monq_mcSV_wNM.subset.sorted.vcf.gz --vcf --output_file monq_mcSV_wNM.vep.vcf --force_overwrite --fasta ${MCPAN}/monq-out_refp_renamed.fa --gff jaqu_plus_chicChW_renamed.sorted.gff.gz \
 #    --everything --variant_class --species custom --assembly custom --fork ${N} --allow_non_variant
+
 
 # per-individual allele counts by worst IMPACT
 VCF=monq_mcSNPSV_wNM.vep.vcf
@@ -904,6 +911,7 @@ bgzip monqNM_mcSNP.vcf
 tabix monqSN_mcSNP.vcf.gz
 tabix monqNM_mcSNP.vcf.gz
 bcftools merge -m all -Ov -o monqNMSN_mcSNP.vcf --threads ${N} monqSN_mcSNP.vcf.gz monqNM_mcSNP.vcf.gz
+
 
 # Estimate Ne
 ${APP}/currentNe2/currentne2 -t ${N} monqCTX_mcSNP.vcf 30 # C TX -> not converge; 
