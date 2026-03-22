@@ -1,0 +1,779 @@
+// Modified by Jong Yoon Jeon from Samarth Mathur's script, Aug 08 2024 
+// 2256 genes
+// Both deleterious and beneficical
+// SLIM=$HOME/app/slim/exe/bin/slim
+
+
+// Na_0 = 1120000; from Mathur & DeWoody (2023)
+
+// Initialize commands to build a genome
+
+initialize() {
+	initializeSLiMModelType("nonWF");
+	initializeSLiMOptions(dimensionality="xy");
+	initializeSex("A");
+	//initializeTreeSeq(simplificationInterval = 1); 
+
+	//setSeed(123); // remove this line and add "-seed 123" when you run slim script on linux
+
+	defaults = Dictionary(
+		"USE_GRIDDENSITY", T, // Calculate density in grids (fast) or standard way (slow)
+		//"FOUNDING_N", 112000, // starting population size
+		"L", c(0.8,0.8,0.2,0.2), // age-related mortality (average of female/male) from Chavarria et al. (2017), Greene (2013) until age of 3
+		"K_tot", 112000, // total carrying-capacity for entire range (1/10 from Mathur & DeWoody (2023) or Extent of occurrence = 1,590,000 km² from Bird International or 5696 * 100 km2 from binary habitat suitability map)
+		"K_loc", 1000, // local carrying-capacity per unit area converted from 10000 birds/100km2 from several references or 1000 birds/100km2 from Palafox et al. (2007)
+		"SX", 0.418, // SX * 3 = 12.55 km (maximum interaction distance) from below (10km x 10km cell)
+		"SM", 0.418, // SM * 3 = 12.55 km (maximum mating distance) from below (10km x 10km cell)
+		"SD", 0.425, // SD * 3 = 12.74 km (maximum dispersal distance) from Greene et al. 2012 (10km x 10km cell)
+		"SV", 0.418, // SV * 3 = 12.55 km (maximum movement distance) from maximum home range of 15751.36 ha in Greene et al. 2012 (10km x 10km cell)
+		"OUTBASE", "/scratch/negishi/jeon96/monq/slim/output_K1000_regular_test22/", // output base directory
+		"INBASE", "/scratch/negishi/jeon96/monq/slim/output_K1000_regular_test22/", // input base directory
+		"IMAGEBASE", "/scratch/negishi/jeon96/monq/slim/hsm/", // image input directory
+		"DF", 3.0 // Degrees of freedom t dist, appraoches normal as DF -> INF
+		);
+	
+	
+	// set up parameters with a user-defined function
+	setupParams(defaults);
+
+	// define constants
+	defineConstant("g",2256); //number of genes
+	defineConstant("geneLength", 1500); // gene length
+	defineConstant("seqLength", g*geneLength);
+	//defineConstant("ROHcutoff", 10000);
+	defineConstant("sampleSize", 100);
+	defineConstant("FECUN", 4); // mean number of offsprings of female (offspring-bearer sex) individuals per time step based on the average covey size (8) from Leopold and McCabe 1957)
+	defineConstant("S_FEC", 0.1); // selection coefficient for fecundity-based spatial selection
+	defineConstant("S_MOR", 0.1); // selection coefficient for mortality-based spatial selection
+	defineConstant("H_FEC", 0.5); // dominance coefficient for fecundity-based spatial selection
+	defineConstant("H_MOR", 0.5); // dominance coefficient for mortality-based spatial selection
+	defineConstant("RHO", FECUN / ((1 + FECUN) * K_loc)); 
+	defineConstant("WIDTH", 257.0); // width of the simulated area (pixel size -1)
+	defineConstant("HEIGHT", 290.0); // height of the simulated area (pixel size -1) 
+	defineConstant("DENSITY_GRID_DIMS", c(1230, 1386)); // Dimensions used for local density calculation; 2 * p0.spatialBounds / SX
+	defineConstant("BURNIN", 112000); // generation resuming from (right after burn-in)
+	defineConstant("RESUME", 112054); // generation resuming from
+	defineConstant("TOTALRUN", 112121); // total running
+	defineConstant("CC", seq(112001, 112121, by = 10));
+	defineConstant("STATS", OUTBASE + "stats_postburnin" + RESUME + ".txt"); // stats output file
+	defineGlobal("PARAMS", defaults);
+	
+	// genome details
+	initializeMutationRate(3.13597726022324e-08); // 10x of the original 3.13597726022324e-09
+	
+	initializeMutationType("m12", 0.5, "f", 0.0); // neutral mutations
+	for (i in 0:5)
+		initializeMutationType(i, i * 0.1, "g", -0.0314833, 0.186); // deleterious mutations; 10x of the original -0.00314833
+	for (j in 6:11)
+		initializeMutationType(j, (j-6) * 0.1 + 0.5, "g", 0.0314833, 0.186); // beneficial mutations (revised from Samarth's); 10x of the original 0.00314833
+	
+	initializeMutationType("m13", H_MOR, "f", S_MOR);
+	
+	m0.convertToSubstitution = F;
+	m1.convertToSubstitution = F;
+	m2.convertToSubstitution = F;
+	m3.convertToSubstitution = F;
+	m4.convertToSubstitution = F;
+	m5.convertToSubstitution = F;
+	m6.convertToSubstitution = F;
+	m7.convertToSubstitution = F;
+	m8.convertToSubstitution = F;
+	m9.convertToSubstitution = F;
+	m10.convertToSubstitution = F;
+	m11.convertToSubstitution = F;
+	m12.convertToSubstitution = T;
+	m13.convertToSubstitution = F;
+	initializeGenomicElementType("g1", c(m12,m0,m6), c(1000,231,2.31)); // Gene element. can have neutral, deleterious, or beneficial mutations
+	
+	gene_nums=c(320,216,180,170,135,82,73,75,72,63,53,51,55,54,48,27,41,43,44,46,31,25,34,26,39,34,51,39,16,43,8,62);
+	
+	// Set recombination rates:
+	// Recombination rate in between "chrosomomes" is 50% (i.e. unlinked).
+	// Recombination rate within genes is 0.
+	// Recombination rate in between genes is 1e-3, the effective recombination rate for 
+	// 100 kb noncoding sequence with a per-site recombination rate of 1e-8 in between 
+	// each gene.
+	
+	for (i in 1:g){
+		initializeGenomicElement(g1, ((i-1)*geneLength)+(i-1), (i*geneLength)+(i-2) );
+	}
+	
+	rates=NULL;
+	// Multiple chromosomes:
+	for (i in 1:(size(gene_nums)-1)){
+		rates=c(rates, 0, rep(c(1e-3, 0), asInteger(gene_nums[i-1]-1)), 0.5); // 10x of the original 1e-4
+	}
+	rates=c(rates, 0, rep(c(1e-3, 0), asInteger(gene_nums[size(gene_nums)-1]-1))); // 10x of the original 1e-4
+	
+	ends=NULL;
+	for (i in 1:g){
+		ends=c(ends, (i*geneLength)+(i-2), (i*geneLength)+(i-1));
+	}
+	ends=ends[0:(size(ends)-2)];
+	
+	initializeRecombinationRate(rates, ends);
+
+	// spatial interaction for local density measurement
+	initializeInteractionType(1, "xy", reciprocal=T, maxDistance=SX * 3);
+	i1.setInteractionFunction("n", 1.0, SX);
+
+	// spatial interaction for mate choice
+	initializeInteractionType(2, "xy", maxDistance = 5/sqrt(K_loc), sexSegregation = "FM"); // efficient version using map; N(mate) = (5/sqrt(K))^2 * K = 25
+	i2.setInteractionFunction("f", 1.0); // efficient version using map
+	//initializeInteractionType(2, "xy", maxDistance=SM * 3, sexSegregation = "FM"); // regular version
+	//i2.setInteractionFunction("n", 1.0, SM); // regular version
+	// model female choosiness, where offspring only disperse from females
+	//i2.setConstraints("receiver", sex="F");
+	//i2.setConstraints("exerter", sex="M");
+}
+
+mutation(m0) {
+	s = mut.selectionCoeff;
+	d = 5 - asInteger(min(floor(abs(s) * 100.0), 5.0)); // 10x of the original
+	mut.setMutationType(d);
+	return T;
+}
+
+mutation(m6) {
+	s = mut.selectionCoeff;
+	d = 6 + asInteger(min(floor(abs(s) * 100.0), 5.0)); // 10x of the original
+	mut.setMutationType(d);
+	return T;
+}
+
+// define function getStats that randomly samples a subpopulation for sampSize # of inds and outputs a string of: 
+// pop size, mean fitness, heterozygosity, mean Froh, and avg num of variants of different classes per individual (very str del, str del, mod del, wk del, very str ben, str ben, mod ben, wk ben)
+
+function (s) getStats(o pop, i sampSize) //modified from Chris Kyriazis's version
+{	
+	actual_sampSize = min(sampSize, pop.individuals.size());
+	i = sample(pop.individuals, actual_sampSize, F);
+	
+	//initialize vectors
+	Num_vstrDel_muts = integer(actual_sampSize);
+	Num_strDel_muts = integer(actual_sampSize);
+	Num_modDel_muts = integer(actual_sampSize);
+	Num_wkDel_muts = integer(actual_sampSize);
+	Num_neut_muts = integer(actual_sampSize);
+	Num_wkBen_muts = integer(actual_sampSize);
+	Num_modBen_muts = integer(actual_sampSize);
+	Num_strBen_muts = integer(actual_sampSize);
+	Num_vstrBen_muts = integer(actual_sampSize);
+	
+	ind_het = float(actual_sampSize);
+	
+	ROH_length_sumPerInd_10Mb = float(actual_sampSize);
+	ROH_length_sumPerInd_1Mb = float(actual_sampSize);
+	ROH_length_sumPerInd_500Kb = float(actual_sampSize);
+    ROH_length_sumPerInd_100Kb = float(actual_sampSize);
+
+	total_nonben_count = sim.countOfMutationsOfType(m0) + sim.countOfMutationsOfType(m1) + sim.countOfMutationsOfType(m2) + sim.countOfMutationsOfType(m3) + sim.countOfMutationsOfType(m4) + sim.countOfMutationsOfType(m5) + sim.countOfMutationsOfType(m12);
+	denom = max(1, total_nonben_count);
+
+	count_m0 = i.countOfMutationsOfType(m0);
+	count_m1 = i.countOfMutationsOfType(m1);
+	count_m2 = i.countOfMutationsOfType(m2);
+	count_m3 = i.countOfMutationsOfType(m3);
+	count_m4 = i.countOfMutationsOfType(m4);
+	count_m5 = i.countOfMutationsOfType(m5);
+
+	LoadP_high_ind = (count_m0 + count_m1) / denom;
+	LoadP_mod_ind  = (count_m2 + count_m3) / denom;
+	LoadP_low_ind  = (count_m4 + count_m5) / denom;
+	LoadP_tot_ind  = (count_m0 + count_m1 + count_m2 + count_m3 + count_m4 + count_m5) / denom;
+	
+	LoadR_high_ind = float(actual_sampSize);
+	LoadR_mod_ind = float(actual_sampSize);
+	LoadR_low_ind = float(actual_sampSize);
+	LoadR_tot_ind = float(actual_sampSize);
+		
+	for (j in seqLen(actual_sampSize)) {
+		individual = i[j];
+		
+		s = individual.genomes.mutations.selectionCoeff;
+
+		Num_vstrDel_muts[j] = sum(s <= -0.5); 
+		Num_strDel_muts[j] = sum(s <= -0.1 & s > -0.5);
+		Num_modDel_muts[j] = sum(s <= -0.01 & s > -0.1);
+		Num_wkDel_muts[j] = sum(s <= -0.0001 & s > -0.01);
+		Num_neut_muts[j] = sum(s == 0.0);
+		Num_vstrBen_muts[j] = sum(s >= 0.5);
+		Num_strBen_muts[j] = sum(s >= 0.1 & s < 0.5);
+		Num_modBen_muts[j] = sum(s >= 0.01 & s < 0.1);
+		Num_wkBen_muts[j] = sum(s >= 0.0001 & s < 0.01);
+		
+		g1_muts = individual.genome1.mutations;
+    	g2_muts = individual.genome2.mutations;
+    	het_muts = setSymmetricDifference(g1_muts, g2_muts); // setSymmetricDifference returns mutations in genome1 OR genome2, but NOT both.
+		hom_muts = setIntersection(g1_muts, g2_muts); // setIntersections returns mutations in both genome1 and genome2.
+
+		//if (size(het_muts) > 0) { 
+        //	in_polym_list = match(het_muts, m_uniq_polym) >= 0; // Only keep mutations that are in your approved list; match returns >= 0 for items found in the list -> no need; setSymmetricDifference will take care of that
+        //	het_muts = het_muts[in_polym_list];
+    	//}
+		
+		count_het = size(het_muts);
+    	ind_het[j] = count_het / seqLength;
+    
+		// extract mutations at A or G sites
+		if (count_het > 0) {
+        	// Extract positions once to avoid property lookup overhead
+        	het_positions = het_muts.position;
+    	} 
+    	// else: values remain 0.0 as initialized by float(), no else block needed
+
+		//code for getting ROHs 	
+		het_muts = sortBy(het_muts, "position");
+		pos_het = het_muts.position;
+
+		startpos = c(0, pos_het); //adds 0 to beggining of vector of hets
+		endpos = c(pos_het, sim.chromosome.lastPosition); //adds last position in genome to vector of hets
+		pos_het_diff = endpos - startpos;
+
+        //sum for ROHs > 10Mb
+        ROH_length_sumPerInd_10Mb[j] = sum(pos_het_diff[pos_het_diff > 10000000]); // add sum of ROHs for each individual to vector of ROHs for all individuals
+		
+		//sum for ROHs > 1Mb
+		ROH_length_sumPerInd_1Mb[j] = sum(pos_het_diff[pos_het_diff > 1000000]); // add sum of ROHs for each individual to vector of ROHs for all individuals
+		
+		//sum for ROHs > 500kb
+		ROH_length_sumPerInd_500Kb[j] = sum(pos_het_diff[pos_het_diff > 500000]); // add sum of ROHs for each individual to vector of ROHs for all individuals
+
+        //sum for ROHs > 100kb
+        ROH_length_sumPerInd_100Kb[j] = sum(pos_het_diff[pos_het_diff > 100000]); // add sum of ROHs for each individual to vector of ROHs for all individuals
+		
+		
+		// Realized load: homozygous mutations
+		hom_high = 2 * (sum(hom_muts.mutationType == m0) + sum(hom_muts.mutationType == m1));
+    	hom_mod  = 2 * (sum(hom_muts.mutationType == m2) + sum(hom_muts.mutationType == m3));
+    	hom_low  = 2 * (sum(hom_muts.mutationType == m4) + sum(hom_muts.mutationType == m5));
+    	hom_tot  = hom_high + hom_mod + hom_low;
+
+		uniq_muts = setUnion(g1_muts, g2_muts); // setUnion returns all components in the two vectors excluding overlaps
+		site_high = 2 * (sum(uniq_muts.mutationType == m0) + sum(uniq_muts.mutationType == m1));
+    	site_mod  = 2 * (sum(uniq_muts.mutationType == m2) + sum(uniq_muts.mutationType == m3));
+    	site_low  = 2 * (sum(uniq_muts.mutationType == m4) + sum(uniq_muts.mutationType == m5));
+    	site_tot  = site_high + site_mod + site_low;
+
+		LoadR_high_ind[j] = hom_high / max(1, site_high);
+    	LoadR_mod_ind[j]  = hom_mod  / max(1, site_mod);
+    	LoadR_low_ind[j]  = hom_low  / max(1, site_low);
+    	LoadR_tot_ind[j]  = hom_tot  / max(1, site_tot);
+	}
+
+	mean_LoadP_high = mean(LoadP_high_ind);
+	mean_LoadP_mod = mean(LoadP_mod_ind);
+	mean_LoadP_low = mean(LoadP_low_ind);
+	mean_LoadP_tot = mean(LoadP_tot_ind);
+
+	mean_LoadR_high = mean(LoadR_high_ind);
+	mean_LoadR_mod  = mean(LoadR_mod_ind);
+	mean_LoadR_low  = mean(LoadR_low_ind);
+	mean_LoadR_tot  = mean(LoadR_tot_ind);
+
+	return(pop.individuals.size() + "," + mean(pop.cachedFitness(NULL)) + "," + mean(ind_het) + "," + calcInbreedingLoad(pop.individuals.genomes) + "," +  mean(ROH_length_sumPerInd_100Kb)/seqLength + "," +  mean(ROH_length_sumPerInd_500Kb)/seqLength + "," + mean(ROH_length_sumPerInd_1Mb)/seqLength + "," + mean(ROH_length_sumPerInd_10Mb)/seqLength + "," + mean(Num_vstrDel_muts) + "," + mean(Num_strDel_muts)+ "," + mean(Num_modDel_muts) + "," + mean(Num_wkDel_muts)+ "," + mean(Num_vstrBen_muts) + "," + mean(Num_strBen_muts) + "," + mean(Num_modBen_muts) + "," + mean(Num_wkBen_muts) + "," + mean(Num_neut_muts) + "," + mean_LoadP_high + "," + mean_LoadP_mod + "," + mean_LoadP_low + "," + mean_LoadP_tot + "," + mean_LoadR_high + "," + mean_LoadR_mod + "," + mean_LoadR_low + "," + mean_LoadR_tot);
+}
+
+//1 first() {
+	//sim.readFromPopulationFile(OUTBASE + "pregenome" + GEN + ".slim");
+	//catn("Resumed simulation at tick: " + community.tick);
+//}
+
+RESUME late() {
+	sim.readFromPopulationFile(INBASE + "postburnin" + RESUME + ".slim"); // when resuming
+	catn("Resumed simulation at tick: " + community.tick);
+	catn("Number of individuals in p0: " + p0.individualCount);
+}
+
+RESUME late() { // the resumed population file was saved at this tick and stage, so will resume from here
+	catn("Reached " + RESUME + " late() stage...");
+	catn("Number of individuals at " + RESUME + " late: " + p0.individualCount);
+
+	// Assign random ages to resumed individuals -> .trees should already have this
+	inds = p0.individuals;
+    
+	// redefining mapvals
+	p0.setSpatialBounds(c(0, 0, WIDTH, HEIGHT)); // set coordinates (just in pixels)
+
+	catn("Individual 0: age = " + inds[0].age + ", x = " + inds[0].spatialPosition[0] + ", y = " + inds[0].spatialPosition[1]);
+	
+	mapImage = Image(IMAGEBASE + 'suit_present_res10_proj.png'); // starting present habitat suitability map; this should be modified according to RESUME generation
+	map_vals = mapImage.floatK; // defining values
+	habitat_map = p0.defineSpatialMap("habitat", "xy", map_vals, valueRange=c(0, 1), colors=c("black", "white"));
+	defineGlobal("HABITAT_MAP", habitat_map);
+	min_map_vals = min(map_vals);
+	max_map_vals = max(map_vals);
+	mean_map_vals = mean(map_vals);
+	catn("Min map value: " + min_map_vals);
+	catn("Max map value: " + max_map_vals);
+	catn("Mean map value: " + mean_map_vals);
+	
+	for (i in 0:4) {
+    pos = inds[i].spatialPosition;
+    suit = HABITAT_MAP.mapValue(pos);
+    catn("Individual " + i + " at " + pos + " => Suitability = " + suit);
+	}
+
+	land_map = p0.defineSpatialMap("land_map", "xy",
+		Image(IMAGEBASE + 'land_present_res10_proj.png').floatK, interpolate=F, valueRange=c(0, 1), colors=c("black", "white")); // this should be modified according to RESUME generation
+	land_map.smooth(SX * 3, "n", SX);
+	defineGlobal("LAND_MAP", land_map);
+
+	density_raw = summarizeIndividuals(p0.individuals,
+		c(DENSITY_GRID_DIMS[0], DENSITY_GRID_DIMS[1]), 
+		p0.spatialBounds, operation="individuals.size();",
+		empty=0.0, perUnitArea=T);
+	density_map = p0.defineSpatialMap("density_map", "xy", density_raw);
+	density_map.smooth(SX * 3, "n", SX);
+	defineGlobal("DENSITY_MAP", density_map);
+	
+	// after burn-in; anything needs to do for (BURNIN + 1) late should go into here
+//	// add beneficial mutation to an individual 
+//	inds = p0.individuals;
+//	suitability = HABITAT_MAP.mapValue(inds.spatialPosition);
+//	maxIndex = which(suitability == max(suitability));
+//	centerinds = p0.individuals[maxIndex];
+//	ages = centerinds.age;
+//	inds = centerinds[ages == 0];
+
+//	if (length(inds) > 0) {
+//		ind = sample(inds, 1);
+//		target = sample(ind.genomes, 1);
+//		defineGlobal("MUT", target.addNewDrawnMutation(m13, asInteger(runif(1, 0, seqLength))));
+//		catn("Beneficial mutation added at tick " + community.tick);
+//		catn("Origin point of mutation (x, y): (" + ind.x + ", " + ind.y + ")");
+//	}
+
+	//cat("Working on post-burn generation: " + community.tick + "\n");
+	catn("Number of individuals in p0 at 'late' after fitnessScaling: " + p0.individualCount);
+
+	// initialize sample stats file
+	line = paste0("Tick,Population,PopSize,MeanFitness,Heterozygosity,InbreedingLoad,Froh100Kb,Froh500Kb,Froh1Mb,Froh10Mb,Num_vstrDel,Num_strDel,Num_modDel,Num_wkDel,Num_vstrBen,Num_strBen,Num_modBen,Num_wkBen,Num_neut,LoadP_high,LoadP_mod,LoadP_low,LoadP_tot,LoadR_high,LoadR_mod,LoadR_low,LoadR_tot\n");
+	writeFile(STATS, line, append=F);
+	//stats = getStats(p0, sampleSize);
+	//line2 = paste0(community.tick + "," + "p0" + "," + stats);
+	//cat(line2);
+	//writeFile(STATS, line2, append=T);
+	//catn("Stats file written to " + STATS);
+
+}
+
+RESUME late() {
+	// set up logging
+	log = community.createLogFile(OUTBASE + 'slim_postburnin' + RESUME + '.log', logInterval=1);
+	log.addTick();
+	log.addSubpopulationSize(p0);
+	log.addCustomColumn('mean_fitness', 'mean(p0.cachedFitness(NULL));');
+	log.addCustomColumn('mean_load', 'calcInbreedingLoad(p0.individuals.genomes);');
+	log.addCustomColumn('allele_freq', 'return exists("MUT") ? sim.mutationFrequencies(NULL, MUT) else NULL;');
+	log.addCustomColumn('pi', 'calcPi(p0.individuals.genomes);');
+	//log.addCustomColumn('mean_offspring', 'mean(p0.lifetimeReproductiveOutput);');
+	log.addCustomColumn('mean_age', 'mean(p0.individuals.age);');
+}
+
+(RESUME+1): first() {
+	catn("Entered first() at " + community.tick);
+
+	// move adult individuals
+	inds = p0.individuals;
+	pos = HABITAT_MAP.sampleImprovedNearbyPoint(inds.spatialPosition, SV*3, "n", SV);
+	inds.setSpatialPosition(pos);
+
+	// preparation for the reproduction() callback
+	i2.evaluate(p0);
+}
+
+(RESUME+1): early() {
+	catn("Entered early() at " + community.tick);
+
+	i1.evaluate(p0);
+
+	// disperse offspring
+	offspring = p0.subsetIndividuals(maxAge=0);
+	//pos = HABITAT_MAP.sampleImprovedNearbyPoint(offspring.spatialPosition, INF, "n", SD); // disperse offsprings following suitable habitats
+	//offspring.setSpatialPosition(pos);
+	p0.deviatePositions(offspring, "reprising", SD*3, "n", SD); // disperse offsprings randomly
+	
+	inds = p0.individuals;
+	locations = inds.spatialPosition;
+	ages = inds.age;
+	catn("Number of individuals in p0 after 'early' assignment: " + p0.individualCount);
+
+	// age-dependent mortality
+	mortality = L[ages];
+	survival = 1 - mortality;
+
+	// local density
+	if (USE_GRIDDENSITY) {
+		// get raw density and re-smooth for each tick
+		density_raw = summarizeIndividuals(inds,
+			c(DENSITY_GRID_DIMS[0], DENSITY_GRID_DIMS[1]),
+			p0.spatialBounds, operation="individuals.size();",
+			empty=0.0, perUnitArea=T);
+		DENSITY_MAP.changeValues(density_raw);
+		DENSITY_MAP.smooth(SX*3, "n", SX);
+		density = p0.spatialMapValue(DENSITY_MAP, locations) / p0.spatialMapValue(LAND_MAP, locations);
+	} else {
+		density = i1.localPopulationDensity(inds) /  p0.spatialMapValue(LAND_MAP, locations); // the latter normalizes the formal based on inhabitable (land) or uninhabitable (ocean) area
+	}
+	
+	// extract suitability value for each individual
+	suitability = HABITAT_MAP.mapValue(inds.spatialPosition);
+
+	//inds.fitnessScaling = 1 / (1 + RHO * density); // density-dependence
+	//inds.fitnessScaling = ifelse(suitability == 0.0, 0.0, 1 / (1 + RHO * density) * (0.5 + 0.5 * suitability)); // suitability penalty scaled by 0.5 (0.4766692), the Pearson correlation estimate between point count vs. suitability
+	inds.fitnessScaling = ifelse(suitability == 0.0, 0.0, survival * suitability * 1 / (1 + RHO * density)); // suitability penalty * age penality
+	inds_to_kill = inds[inds.age >= 3];  // make sure individuals at age 3 defined
+	if (size(inds_to_kill) > 0) {
+        inds_to_kill.fitnessScaling = 0.0; // Reduce fitness to 0
+    }
+	//p0.fitnessScaling = min(K_tot / p0.individualCount, 1.0);
+
+	for (i in 0:4) {
+    catn("GEN = " + community.tick + " | Individual " + i + " fitnessScaling =  " + inds[i].fitnessScaling);
+	}
+}
+
+//(BURNIN+1) late() { // this should be done already right after burn-in
+//	inds = p0.individuals;
+//	ind_count = size(inds);
+	
+//	if (ind_count > K_tot) { // WF model-like approach fixing the total number of individuals
+//        // If the population size is greater than the fixed target, cull the excess randomly.
+//        num_to_kill = ind_count - K_tot;
+        
+//        // Randomly sample 'num_to_kill' individuals from the current population
+//        individuals_to_cull = sample(inds, num_to_kill, replace=F);
+        
+//        // Immediately remove these selected individuals from the simulation
+//        sim.killIndividuals(individuals_to_cull); 
+//    }
+
+//	// add beneficial mutation to individual 
+//	inds = p0.individuals;
+//	suitability = HABITAT_MAP.mapValue(inds.spatialPosition);
+//	maxIndex = which(suitability == max(suitability));
+//	centerinds = p0.individuals[maxIndex];
+//	ages = centerinds.age;
+//	inds = centerinds[ages == 0];
+
+//	if (length(inds) > 0) {
+//		ind = sample(inds, 1);
+//		target = sample(ind.genomes, 1);
+//		defineGlobal("MUT", target.addNewDrawnMutation(m13, asInteger(runif(1, 0, seqLength))));
+//		catn("Beneficial mutation added at tick " + community.tick);
+//		catn("Origin point of mutation (x, y): (" + ind.x + ", " + ind.y + ")");
+//	}
+
+//	//if (length(inds) = 0) {
+//	//	ageIndex = which(ages == min(ages));
+//	//	inds = centerinds[ageIndex];
+//	//	ind = sample(inds, 1);
+//	//	target = sample(ind.genomes, 1);
+//	//	defineGlobal("MUT", target.addNewDrawnMutation(m13, asInteger(runif(1, 0, seqLength))));
+//	//	catn("Beneficial mutation added at tick " + community.tick);
+//	//	catn("Origin point of mutation (x, y): (" + ind.x + ", " + ind.y + ")");
+//	//}
+//}
+
+//output generation
+(RESUME+1): late() {
+	catn("Entered late() at " + community.tick);
+	catn("Number of individuals in p0 at 'late' after fitnessScaling: " + p0.individualCount);
+
+	if (!any(community.tick == c(BURNIN + 1, BURNIN + 31, BURNIN + 61, BURNIN + 91))) {
+		inds = p0.individuals;
+		ind_count = size(inds);
+
+		if (ind_count > K_tot) { // WF model-like approach fixing the total number of individuals
+        	// If the population size is greater than the fixed target, cull the excess randomly.
+        	num_to_kill = ind_count - K_tot;
+        
+        	// Randomly sample 'num_to_kill' individuals from the current population
+        	individuals_to_cull = sample(inds, num_to_kill, replace=F);
+        
+        	// Immediately remove these selected individuals from the simulation
+        	sim.killIndividuals(individuals_to_cull); 
+    	}
+	}
+
+	//track statistics every generation for total run time
+	//if (community.tick % 10 == 0) { 
+	if (community.tick > RESUME) {
+	//if (p0.individualCount > 0 & size(p0.individuals.genomes.mutations) > 0) {
+	//	// If both conditions are met, run the code
+		stats = getStats(p0, sampleSize);
+		line = paste0(community.tick + "," + "p0" + "," + stats);
+		catn(line);
+		writeFile(STATS, line, append=T);
+	//} else {
+    //// If conditions are not met, log a message (similar to your 'catch' block idea)
+    //catn("Skipping stats calculation at generation " + community.tick + ". Either p0 has no individuals or no mutations.");
+	//}
+	}
+}
+
+CC late() {
+	if (community.tick > RESUME) {
+		line = paste0("id\tx\ty");
+		writeFile(OUTBASE + "locations" + community.tick + ".txt", line, append=F);
+		lines = NULL;
+		actual_sampSize = min(sampleSize, p0.individuals.size());
+		samples = sample(p0.individuals, actual_sampSize);
+		samples.genomes.outputVCF(filePath = OUTBASE + community.tick + ".vcf"); //order should be the same with geocoordinates below
+		for (i in samples) {
+			new_line = paste0(i.index, "\t", i.spatialPosition[0], "\t", i.spatialPosition[1]);
+			lines = c(lines, new_line);
+		}
+		writeFile(OUTBASE + "locations" + community.tick + ".txt", lines, append=T);
+	}
+}
+
+TOTALRUN late() {
+	sim.outputFull(OUTBASE + "postburnin" + community.tick + ".slim", T);	
+	//sim.treeSeqOutput(OUTBASE + "postburnin" + community.tick + ".trees");
+}
+
+late() {
+	if (community.tick > RESUME) {
+		if ((community.tick - RESUME) % 10 == 0) {
+			//sim.treeSeqSimplify();
+    		sim.outputFull(OUTBASE + "postburnin" + community.tick + ".slim", T);
+			//sim.treeSeqOutput(OUTBASE + "postburnin" + community.tick + ".trees");
+		}
+	}
+}
+
+late() {
+	if (community.tick > RESUME) {
+		if (p0.individualCount == 0) {
+			catn("Population went extinct! Ending the simulation.");
+			sim.simulationFinished();
+		}
+	}
+}
+
+//(RESUME+1): reproduction(NULL, "F") {  // after burn-in; Apply to all females
+(RESUME+1): reproduction() {
+	catn("Entered reproduction() at " + community.tick);
+
+	// Sample nearby locations for potential mates
+	females = p0.individuals[p0.individuals.sex == "F" & p0.individuals.age >= 1];
+	for (female in females) {
+		closest_males_location = DENSITY_MAP.sampleNearbyPoint(female.spatialPosition, SM*3, "n", SM); // efficient version using map
+
+	
+	// Find the nearby neighbors at the sampled locations
+		closest_males = i2.nearestNeighborsOfPoint(closest_males_location, p0, rpois(1,2)); // twice of targetted values rpois(1,1) assuming 1:1 sex ratio; efficient version using map 
+		closest_males = closest_males[closest_males.sex == "M" & closest_males.age >= 1];
+	
+	// mating process
+		for (mate in closest_males) {
+			if (!isNULL(mate)) {
+				// after map added/changed, the introduced mutation affects fecundity
+				if (exists("MUT")) {
+					// If mutation exists, calculate effect on fecundity
+					mutcount = sum(individual.genomes.containsMutations(MUT));
+					// indiv_s and fecundity increase due to it is designed so that selection via mortality and fecundity has the same expected effect size
+					indiv_s = 2 * S_FEC * (H_FEC * asFloat(mutcount==1) + asFloat(mutcount==2));
+					nOff = rpois(1, 2 * FECUN * (1 + indiv_s) + indiv_s);
+				} else {
+					// If mutation is not defined, use baseline fecundity
+					nOff = rpois(1, 2 * FECUN);
+				}
+				subpop.addCrossed(female, mate, count = nOff);  // Create offspring
+    	    }
+		}
+	}
+	self.active = 0;
+}
+
+
+(BURNIN+31) first() {
+	if (community.tick > RESUME) {
+		// add 2011-2040 habitat suitability map
+		mapImage = Image(IMAGEBASE + 'ssp585_suit_2040_res10_proj.png'); 
+		map_vals = mapImage.floatK; // defining values
+		habitat_map = p0.defineSpatialMap("habitat", "xy", map_vals, valueRange=c(0, 1), colors=c("black", "white"));
+		// habitat_map = p1.defineSpatialMap("mapvals", "xy", mapImage.floatK, valueRange = c(0, 1), colors = c("black", "white"));
+		defineGlobal("HABITAT_MAP", habitat_map);
+
+		// add 2011-2040 land map
+		land_map = p0.defineSpatialMap("land_map", "xy",
+			Image(IMAGEBASE + 'ssp585_land_2040_res10_proj.png').floatK, interpolate=F,
+			valueRange=c(0, 1), colors=c("black", "white"));
+		land_map.smooth(SX * 3, "n", SX);
+		defineGlobal("LAND_MAP", land_map);
+	}
+}
+
+(BURNIN+31) late() {
+	if (community.tick > RESUME) {
+		inds = p0.individuals;
+		ind_count = size(inds);
+	
+		if (ind_count > K_tot) { // WF model-like approach fixing the total number of individuals
+    	    // If the population size is greater than the fixed target, cull the excess randomly.
+    	    num_to_kill = ind_count - K_tot;
+        
+    	    // Randomly sample 'num_to_kill' individuals from the current population
+    	    individuals_to_cull = sample(inds, num_to_kill, replace=F);
+        
+    	    // Immediately remove these selected individuals from the simulation
+    	    sim.killIndividuals(individuals_to_cull); 
+    	}
+
+		// add beneficial mutation to individual 
+		inds = p0.individuals;
+		suitability = HABITAT_MAP.mapValue(inds.spatialPosition);
+		maxIndex = which(suitability == max(suitability));
+		centerinds = p0.individuals[maxIndex];
+		ages = centerinds.age;
+		inds = centerinds[ages == 0];
+
+		if (length(inds) > 0) {
+			ind = sample(inds, 1);
+			target = sample(ind.genomes, 1);
+			defineGlobal("MUT", target.addNewDrawnMutation(m13, asInteger(runif(1, 0, seqLength))));
+			catn("Beneficial mutation added at tick " + community.tick);
+			catn("Origin point of mutation (x, y): (" + ind.x + ", " + ind.y + ")");
+		}
+	}
+}
+
+(BURNIN+61) first() {
+	if (community.tick > RESUME) {
+		// add 2041-2070 habitat suitability map
+		mapImage = Image(IMAGEBASE + 'ssp585_suit_2070_res10_proj.png'); 
+		map_vals = mapImage.floatK; // defining values
+		habitat_map = p0.defineSpatialMap("habitat", "xy", map_vals, valueRange=c(0, 1), colors=c("black", "white"));
+		// habitat_map = p1.defineSpatialMap("mapvals", "xy", mapImage.floatK, valueRange = c(0, 1), colors = c("black", "white"));
+		defineGlobal("HABITAT_MAP", habitat_map);
+
+		// add 2041-2070 land map
+		land_map = p0.defineSpatialMap("land_map", "xy",
+			Image(IMAGEBASE + 'ssp585_land_2070_res10_proj.png').floatK, interpolate=F,
+			valueRange=c(0, 1), colors=c("black", "white"));
+		land_map.smooth(SX * 3, "n", SX);
+		defineGlobal("LAND_MAP", land_map);
+	}
+}
+
+(BURNIN+61) late() {
+	if (community.tick > RESUME) {
+		inds = p0.individuals;
+		ind_count = size(inds);
+	
+		if (ind_count > K_tot) { // WF model-like approach fixing the total number of individuals
+    	    // If the population size is greater than the fixed target, cull the excess randomly.
+    	    num_to_kill = ind_count - K_tot;
+        
+    	    // Randomly sample 'num_to_kill' individuals from the current population
+    	    individuals_to_cull = sample(inds, num_to_kill, replace=F);
+        
+    	    // Immediately remove these selected individuals from the simulation
+    	    sim.killIndividuals(individuals_to_cull); 
+    	}
+
+		// add beneficial mutation to individual 
+		inds = p0.individuals;
+		suitability = HABITAT_MAP.mapValue(inds.spatialPosition);
+		maxIndex = which(suitability == max(suitability));
+		centerinds = p0.individuals[maxIndex];
+		ages = centerinds.age;
+		inds = centerinds[ages == 0];
+
+		if (length(inds) > 0) {
+			ind = sample(inds, 1);
+			target = sample(ind.genomes, 1);
+			defineGlobal("MUT", target.addNewDrawnMutation(m13, asInteger(runif(1, 0, seqLength))));
+			catn("Beneficial mutation added at tick " + community.tick);
+			catn("Origin point of mutation (x, y): (" + ind.x + ", " + ind.y + ")");
+		}
+	}
+}
+
+(BURNIN+91) first() {
+	if (community.tick > RESUME) {
+		// add 2071-2100 habitat suitability map
+		mapImage = Image(IMAGEBASE + 'ssp585_suit_2100_res10_proj.png'); 
+		map_vals = mapImage.floatK; // defining values
+		habitat_map = p0.defineSpatialMap("habitat", "xy", map_vals, valueRange=c(0, 1), colors=c("black", "white"));
+		// habitat_map = p1.defineSpatialMap("mapvals", "xy", mapImage.floatK, valueRange = c(0, 1), colors = c("black", "white"));
+		defineGlobal("HABITAT_MAP", habitat_map);
+
+		// add 2071-2100 land map
+		land_map = p0.defineSpatialMap("land_map", "xy",
+			Image(IMAGEBASE + 'ssp585_land_2100_res10_proj.png').floatK, interpolate=F,
+			valueRange=c(0, 1), colors=c("black", "white"));
+		land_map.smooth(SX * 3, "n", SX);
+		defineGlobal("LAND_MAP", land_map);
+	}
+}
+
+(BURNIN+91) late() {
+	if (community.tick > RESUME) {
+		inds = p0.individuals;
+		ind_count = size(inds);
+	
+		if (ind_count > K_tot) { // WF model-like approach fixing the total number of individuals
+    	    // If the population size is greater than the fixed target, cull the excess randomly.
+    	    num_to_kill = ind_count - K_tot;
+        
+    	    // Randomly sample 'num_to_kill' individuals from the current population
+    	    individuals_to_cull = sample(inds, num_to_kill, replace=F);
+        
+    	    // Immediately remove these selected individuals from the simulation
+    	    sim.killIndividuals(individuals_to_cull); 
+    	}
+	
+		// add beneficial mutation to individual 
+		inds = p0.individuals;
+		suitability = HABITAT_MAP.mapValue(inds.spatialPosition);
+		maxIndex = which(suitability == max(suitability));
+		centerinds = p0.individuals[maxIndex];
+		ages = centerinds.age;
+		inds = centerinds[ages == 0];
+
+		if (length(inds) > 0) {
+			ind = sample(inds, 1);
+			target = sample(ind.genomes, 1);
+			defineGlobal("MUT", target.addNewDrawnMutation(m13, asInteger(runif(1, 0, seqLength))));
+			catn("Beneficial mutation added at tick " + community.tick);
+			catn("Origin point of mutation (x, y): (" + ind.x + ", " + ind.y + ")");
+		}
+	}
+}
+
+TOTALRUN late() {
+	catn("End of simulation (run time reached)");
+	sim.simulationFinished();
+}
+
+
+function (void)setupParams(object<Dictionary>$ defaults)
+{
+	if (!exists("PARAMFILE")) defineConstant("PARAMFILE", "./params.json");
+	if (!exists("OUTDIR")) defineConstant("OUTDIR", ".");
+	defaults.addKeysAndValuesFrom(Dictionary("PARAMFILE", PARAMFILE, "OUTDIR", OUTDIR));
+	
+	if (fileExists(PARAMFILE)){
+		defaults.addKeysAndValuesFrom(Dictionary(readFile(PARAMFILE)));
+		defaults.setValue("READ_FROM_PARAMFILE", PARAMFILE);
+	}
+	
+	//defaults.setValue("OUTBASE", OUTDIR + "/out_" +	defaults.getValue("seed"));
+	//defaults.setValue("OUTPATH", defaults.getValue("OUTBASE") + ".trees");
+	
+	for (k in defaults.allKeys) {
+		if (!exists(k))
+			defineConstant(k, defaults.getValue(k));
+		else
+			defaults.setValue(k, executeLambda(paste(c(k, ";"), sep='')));
+	}
+	
+	// print out default values
+	catn("===========================");
+	catn("Model constants: " + defaults.serialize("pretty"));
+	catn("===========================");
+}
