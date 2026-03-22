@@ -1,0 +1,817 @@
+initialize() {
+	initializeSLiMModelType("nonWF");
+    initializeSLiMOptions(nucleotideBased=T);
+    defineConstant("seqLength", initializeAncestralNucleotides("dummy_fasta_withT_forSlim.fa")); // ref genome of the region in the vcf
+    defineConstant("SEG_LENGTHS", c(187253613, 143889576, 106587352, 86702906, 62230339, 34710358, 35999764, 28635433, 23223646, 36229164, 2551141, 19229731, 17536096, 15398947, 13881805, 236667, 10374054, 10863692, 10242182, 14131414, 6947795, 5175408, 5946259, 6619031, 2852452, 5944936, 5554435, 5411172, 76528624, 14831466));  // chr1, chr2, chr3; see dummy_fasta_forSLiM_segments.tsv
+	initializeSex("A"); 
+	initializeTreeSeq(simplificationInterval = 100); 
+
+	//setSeed(123); // remove this line and add "-seed 123" when you run slim script on linux
+
+	defaults = Dictionary(
+		"L", c(0.8,0.8,0.2,0.2), // age-related mortality (average of female/male) from Chavarria et al. (2017), Greene (2013) until age of 3
+		"K_p1", 662, // local carrying-capacity per unit area of p1 (CTX) converted from contemporary effective pop size (132.40)
+		"K_p2", 3365, // local carrying-capacity per unit area of p2 (NM) converted from contemporary effective pop size (336.53)
+		"K_p3", 4336, // local carrying-capacity per unit area of p3 (SEMX) converted from contemporary effective pop size (433.57)
+		"OUTBASE", "/scratch/gautschi/jeon96/monq/slim/output_rescue/" // output base directory
+		);
+	
+	// set up parameters with a user-defined function
+	setupParams(defaults);
+
+	// define constants
+	defineConstant("sampleSize", 100);
+	defineConstant("FECUN", 4); // mean number of offsprings of female (offspring-bearer sex) individuals per time step based on the average covey size (8) from Leopold and McCabe 1957)
+	defineConstant("BURNIN", 43360); // generation resuming from; 10 x max(p1, p2, p3); but see 'preburnin.log' to check BURNIN value
+	defineConstant("TOTALRUN", 43481); // total running = 43360 + 121; but see 'preburnin.log' to check BURNIN value
+	defineConstant("CC", seq(43361, 43481, by = 10)); // but see 'preburnin.log' to check BURNIN value
+	defineGlobal("PARAMS", defaults);
+	defineConstant("numMig", 200); // the number of migrants for rescue; 10% of the source?
+    defineConstant("numRes", 3); // the number of genetic rescue events; 3
+    defineConstant("INTERVAL", 1); // interval of genetic rescue events
+	defineConstant("SOURCE", "p2"); // source population of genetic rescue events
+    defineConstant("STATS", OUTBASE + "stats_preburnin_rescue.txt"); // stats output file
+
+	// genome details
+
+	// Set recombination rates:
+	// Recombination rate in between "chrosomomes" is 50% (i.e. unlinked).
+	// per-site recombination rate of 1e-8 in each chromosome
+
+	segCount = size(SEG_LENGTHS);
+    genomeLen = sum(SEG_LENGTHS);
+
+	rates = c(); // recombination rate
+    ends  = c();
+
+	pos = 0;
+    for (seg in 0:(segCount-1)) {
+        len = SEG_LENGTHS[seg];
+        segEnd = pos + len - 1;
+
+        // inner-segment (pos - segEnd) recombination rate 1e-8
+        rates = c(rates, 1e-8);
+        ends  = c(ends, segEnd);
+
+		pos = segEnd + 1; // after the linkage above
+
+        // between-segment recombination rate 0.5
+        if (seg < segCount - 1) {
+            // between segEnd / (segEnd+1) recombination rate
+            rates = c(rates, 0.5);
+            ends  = c(ends, segEnd + 1);
+        }
+
+        pos = pos + 1; // next position after the segment break above
+    }
+
+	initializeRecombinationRate(rates, ends);
+
+	initializeMutationTypeNuc("m12", 0.5, "f", 0.0); // neutral mutations
+	for (i in 0:5)
+		initializeMutationTypeNuc(i, i * 0.1, "g", -0.00314833, 0.186); // deleterious mutations; 10x of the original -0.00314833
+	for (j in 6:11)
+		initializeMutationTypeNuc(j, (j-6) * 0.1 + 0.5, "g", 0.00314833, 0.186); // beneficial mutations (revised from Samarth's); 10x of the original 0.00314833
+	initializeMutationTypeNuc("m13", 0.5, "f", 0.0); // for tracking empirical variants
+	initializeMutationTypeNuc("m15", 0, "f", -0.01); // highly-deleterious mutations (following the definition of strDel) to apply empirical genetic load
+	initializeMutationTypeNuc("m16", 0.4, "f", -0.001); // moderately-deleterious mutations (follwoing the definition of modDel) to apply empirical genetic load
+
+	c(m0, m1, m15).tag = 1; // m0, m1, m15 -> High (1)
+	c(m2, m3, m16).tag = 2; // m2, m3, m16 -> Mod (2)
+	c(m4, m5).tag = 3; // m4, m5 -> Low (3)
+	c(m12, m13).tag = 4; // m12, m13 -> neut (4)
+
+	m0.convertToSubstitution = F;
+	m1.convertToSubstitution = F;
+	m2.convertToSubstitution = F;
+	m3.convertToSubstitution = F;
+	m4.convertToSubstitution = F;
+	m5.convertToSubstitution = F;
+	m6.convertToSubstitution = F;
+	m7.convertToSubstitution = F;
+	m8.convertToSubstitution = F;
+	m9.convertToSubstitution = F;
+	m10.convertToSubstitution = F;
+	m11.convertToSubstitution = F;
+	m12.convertToSubstitution = T;
+	m13.convertToSubstitution = F;
+	m15.convertToSubstitution = F;
+	m16.convertToSubstitution = F;
+
+	alpha = 3.13597726022324e-09 / 3.0;
+	initializeGenomicElementType("g1", c(m12,m0,m6), c(1000,231,2.31), mutationMatrix=mmJukesCantor(alpha)); // Gene element. can have neutral, deleterious, or beneficial mutations
+	initializeGenomicElement(g1, 0, genomeLen - 1); 
+	initializeHotspotMap(0.0);
+}
+
+mutation(m0) {
+	s = mut.selectionCoeff;
+	d = 5 - asInteger(min(floor(abs(s) * 1000.0), 5.0)); // 10x of the original
+	mut.setMutationType(d);
+	return T;
+}
+
+mutation(m6) {
+	s = mut.selectionCoeff;
+	d = 6 + asInteger(min(floor(abs(s) * 1000.0), 5.0)); // 10x of the original
+	mut.setMutationType(d);
+	return T;
+}
+
+// define function getStats that randomly samples a subpopulation for sampSize # of inds and outputs a string of: 
+// pop size, mean fitness, heterozygosity, mean Froh, and avg num of variants of different classes per individual (very str del, str del, mod del, wk del, very str ben, str ben, mod ben, wk ben)
+
+function (f) getStats(o pop, i sampSize) //modified from Chris Kyriazis's version
+{	
+	actual_sampSize = min(sampSize, pop.individuals.size());
+	i = sample(pop.individuals, actual_sampSize, F);
+	
+	//initialize vectors
+	Num_vstrDel_muts = integer(actual_sampSize);
+	Num_strDel_muts = integer(actual_sampSize);
+	Num_modDel_muts = integer(actual_sampSize);
+	Num_wkDel_muts = integer(actual_sampSize);
+	Num_neut_muts = integer(actual_sampSize);
+	Num_wkBen_muts = integer(actual_sampSize);
+	Num_modBen_muts = integer(actual_sampSize);
+	Num_strBen_muts = integer(actual_sampSize);
+	Num_vstrBen_muts = integer(actual_sampSize);
+	
+	ind_het = float(actual_sampSize);
+	ind_het_A = float(actual_sampSize);
+	ind_het_G = float(actual_sampSize);
+	
+	ROH_length_sumPerInd_10Mb = float(actual_sampSize);
+	ROH_length_sumPerInd_1Mb = float(actual_sampSize);
+	ROH_length_sumPerInd_500Kb = float(actual_sampSize);
+    ROH_length_sumPerInd_100Kb = float(actual_sampSize);
+
+	//total_nonben_count = sim.countOfMutationsOfType(m0) + sim.countOfMutationsOfType(m1) + sim.countOfMutationsOfType(m2) + sim.countOfMutationsOfType(m3) + sim.countOfMutationsOfType(m4) + sim.countOfMutationsOfType(m5) + sim.countOfMutationsOfType(m12) + sim.countOfMutationsOfType(m13); // + sim.countOfMutationsOfType(m15) + sim.countOfMutationsOfType(m16) + sim.countOfMutationsOfType(m17);
+	//denom = max(1, total_nonben_count);
+
+	//count_m0 = i.countOfMutationsOfType(m0);
+	//count_m1 = i.countOfMutationsOfType(m1);
+	//count_m2 = i.countOfMutationsOfType(m2);
+	//count_m3 = i.countOfMutationsOfType(m3);
+	//count_m4 = i.countOfMutationsOfType(m4);
+	//count_m5 = i.countOfMutationsOfType(m5);
+	//count_m15 = i.countOfMutationsOfType(m15);
+	//count_m16 = i.countOfMutationsOfType(m16);
+	//count_m17 = i.countOfMutationsOfType(m17);
+
+	//LoadP_high_ind = (count_m0 + count_m1 + count_m15) / denom;
+	//LoadP_mod_ind  = (count_m2 + count_m3 + count_m16) / denom;
+	//LoadP_low_ind  = (count_m4 + count_m5 + count_m17) / denom;
+	//LoadP_tot_ind  = (count_m0 + count_m1 + count_m2 + count_m3 + count_m4 + count_m5 + count_m16 + count_m16 + count_m17) / denom;
+	
+	LoadP_high_ind = float(actual_sampSize);
+	LoadP_mod_ind = float(actual_sampSize);
+	LoadP_low_ind = float(actual_sampSize);
+	LoadP_tot_ind = float(actual_sampSize);
+
+	LoadR_high_ind = float(actual_sampSize);
+	LoadR_mod_ind = float(actual_sampSize);
+	LoadR_low_ind = float(actual_sampSize);
+	LoadR_tot_ind = float(actual_sampSize);
+		
+	//high_types = c(m0, m1, m15);
+	//mod_types = c(m2, m3, m16);
+	//low_types = c(m4, m5, m17);
+	//neut_types = c(m12, m13);
+	//all_types = c(high_types, mod_types, low_types, neut_types);
+
+	LoadP_high_ind_A = float(actual_sampSize);
+	LoadP_mod_ind_A = float(actual_sampSize);
+	LoadP_low_ind_A = float(actual_sampSize);
+	LoadP_tot_ind_A = float(actual_sampSize);
+	LoadP_high_ind_G = float(actual_sampSize);
+	LoadP_mod_ind_G = float(actual_sampSize);
+	LoadP_low_ind_G = float(actual_sampSize);
+	LoadP_tot_ind_G = float(actual_sampSize);
+
+	LoadR_high_ind_A = float(actual_sampSize);
+	LoadR_mod_ind_A = float(actual_sampSize);
+	LoadR_low_ind_A = float(actual_sampSize);
+	LoadR_tot_ind_A = float(actual_sampSize);
+	LoadR_high_ind_G = float(actual_sampSize);
+	LoadR_mod_ind_G = float(actual_sampSize);
+	LoadR_low_ind_G = float(actual_sampSize);
+	LoadR_tot_ind_G = float(actual_sampSize);
+
+	for (j in seqLen(actual_sampSize)) {
+		individual = i[j];
+		
+		// tally number of mutations for different classes of selection coefficient per individual
+		all_muts = individual.genomes.mutations;
+		//s = all_muts.selectionCoeff;
+
+		//Num_vstrDel_muts[j] = sum(s <= -0.05); 
+		//Num_strDel_muts[j] = sum(s <= -0.01 & s > -0.05);
+		//Num_modDel_muts[j] = sum(s <= -0.001 & s > -0.01);
+		//Num_wkDel_muts[j] = sum(s <= -0.00001 & s > -0.001);
+		//Num_neut_muts[j] = sum(s == 0.0);
+		//Num_vstrBen_muts[j] = sum(s >= 0.05);
+		//Num_strBen_muts[j] = sum(s >= 0.01 & s < 0.05);
+		//Num_modBen_muts[j] = sum(s >= 0.001 & s < 0.01);
+		//Num_wkBen_muts[j] = sum(s >= 0.00001 & s < 0.001);
+		
+		g1_muts = individual.genome1.mutations;
+    	g2_muts = individual.genome2.mutations;
+    	het_muts = setSymmetricDifference(g1_muts, g2_muts); // setSymmetricDifference returns mutations in genome1 OR genome2, but NOT both.
+		hom_muts = setIntersection(g1_muts, g2_muts); // setIntersections returns mutations in both genome1 and genome2.
+
+		uniq_muts = individual.uniqueMutations;  // setUnion returns all components in the two vectors excluding overlaps -> uniqueMutations is faster
+		
+		count_het = size(het_muts);
+    	ind_het[j] = count_het / seqLength;
+    
+		// extract mutations at A or G sites
+		if (count_het > 0) {
+        	// Extract positions once to avoid property lookup overhead
+        	het_positions = het_muts.position;
+        
+        	// Count matches in A_SITES; match() allows us to check the whole vector against the site list at once
+			het_anc_nucs = ANC_SEQ[het_positions]; 
+        	count_A = sum(het_anc_nucs == 0); 
+        	ind_het_A[j] = count_A / TOTAL_A_SITES;
+        
+        	// Count matches in G_SITES
+        	count_G = sum(het_anc_nucs == 2);
+        	ind_het_G[j] = count_G / TOTAL_G_SITES;
+    	} 
+    	// else: values remain 0.0 as initialized by float(), no else block needed
+
+		//code for getting ROHs 	
+		het_muts = sortBy(het_muts, "position");
+		pos_het = het_muts.position;
+
+		startpos = c(0, pos_het); //adds 0 to beggining of vector of hets
+		endpos = c(pos_het, sim.chromosome.lastPosition); //adds last position in genome to vector of hets
+		pos_het_diff = endpos - startpos;
+
+        //sum for ROHs > 10Mb
+        ROH_length_sumPerInd_10Mb[j] = sum(pos_het_diff[pos_het_diff > 10000000]); // add sum of ROHs for each individual to vector of ROHs for all individuals
+		
+		//sum for ROHs > 1Mb
+		ROH_length_sumPerInd_1Mb[j] = sum(pos_het_diff[pos_het_diff > 1000000]); // add sum of ROHs for each individual to vector of ROHs for all individuals
+		
+		//sum for ROHs > 500kb
+		ROH_length_sumPerInd_500Kb[j] = sum(pos_het_diff[pos_het_diff > 500000]); // add sum of ROHs for each individual to vector of ROHs for all individuals
+
+        //sum for ROHs > 100kb
+        ROH_length_sumPerInd_100Kb[j] = sum(pos_het_diff[pos_het_diff > 100000]); // add sum of ROHs for each individual to vector of ROHs for all individuals
+		
+		// Potential load: number of deleterious mutations
+		if (all_muts.size() > 0) {
+			mut_positions = all_muts.position;
+			mut_anc_nucs = ANC_SEQ[mut_positions]; 
+			//type_tags = all_muts.mutationType.tag;
+			s_vec = all_muts.selectionCoeff;
+			//h_vec = all_muts.mutationType.dominanceCoeff;
+
+			is_m13 = (all_muts.mutationType == m13);
+			if (any(is_m13)) {
+				m13_subset = all_muts[is_m13];
+        
+		        s_key = "s_p" + pop.id;
+        		//h_key = "h_p" + pop.id;
+        
+               	stored_s = m13_subset.getValue(s_key);
+				//stored_s = sapply(m13_subset, "v = applyValue.getValue('" + s_key + "'); if (isNULL(v)) 0.0; else v;");
+        		//stored_h = m13_subset.getValue(h_key);
+        
+        		s_vec[is_m13] = stored_s;
+        		//h_vec[is_m13] = stored_h;
+    		}
+			is_High = (s_vec <= -0.01);
+			is_Mod  = (s_vec > -0.01) & (s_vec <= -0.001);
+			is_Low  = (s_vec > -0.001) & (s_vec <= -0.00001);
+			is_Neut = (s_vec == 0.0);
+
+			//is_High = (type_tags == 1);
+			//is_Mod  = (type_tags == 2);
+			//is_Low  = (type_tags == 3);
+			//is_Neut = (type_tags == 4);
+
+			count_high = sum(is_High);
+			count_mod = sum(is_Mod);
+			count_low = sum(is_Low);
+			count_neut = sum(is_Neut);
+
+			total_nonben = count_high + count_mod + count_low + count_neut; 
+			denom = max(1, total_nonben);
+
+			LoadP_high_ind[j] = count_high / denom;
+			LoadP_mod_ind[j]  = count_mod / denom;
+			LoadP_low_ind[j]  = count_low / denom;
+			LoadP_tot_ind[j]  = (count_high + count_mod + count_low) / denom;
+
+		// A and G sites
+			is_A = (mut_anc_nucs == 0); // Ancestral A
+			is_G = (mut_anc_nucs == 2); // Ancestral G
+
+			count_high_A = sum(is_A & is_High);
+    		count_mod_A  = sum(is_A & is_Mod);
+    		count_low_A  = sum(is_A & is_Low);
+			count_neut_A = sum(is_A & is_Neut);
+		
+			total_nonben_A = count_high_A + count_mod_A + count_low_A + count_neut_A; 
+			denom_A = max(1, total_nonben_A);
+
+			LoadP_high_ind_A[j] = count_high_A / denom_A;
+			LoadP_mod_ind_A[j]  = count_mod_A  / denom_A;
+			LoadP_low_ind_A[j]  = count_low_A  / denom_A;
+			LoadP_tot_ind_A[j]  = (count_high_A + count_mod_A + count_low_A) / denom_A;
+
+			count_high_G = sum(is_G & is_High);
+    		count_mod_G  = sum(is_G & is_Mod);
+    		count_low_G  = sum(is_G & is_Low);
+			count_neut_G = sum(is_G & is_Neut);
+		
+			total_nonben_G = count_high_G + count_mod_G + count_low_G + count_neut_G; 
+			denom_G = max(1, total_nonben_G);
+		
+			LoadP_high_ind_G[j] = count_high_G / denom_G;
+			LoadP_mod_ind_G[j]  = count_mod_G  / denom_G;
+			LoadP_low_ind_G[j]  = count_low_G  / denom_G;
+			LoadP_tot_ind_G[j]  = (count_high_G + count_mod_G + count_low_G) / denom_G;
+		} else {
+			LoadP_high_ind[j] = 0.0; LoadP_mod_ind[j] = 0.0; LoadP_low_ind[j] = 0.0; LoadP_tot_ind[j] = 0.0;
+			LoadP_high_ind_A[j] = 0.0; LoadP_mod_ind_A[j] = 0.0; LoadP_low_ind_A[j] = 0.0; LoadP_tot_ind_A[j] = 0.0;
+			LoadP_high_ind_G[j] = 0.0; LoadP_mod_ind_G[j] = 0.0; LoadP_low_ind_G[j] = 0.0; LoadP_tot_ind_G[j] = 0.0;
+		}
+
+		// Realized load: homozygous mutations
+		if (size(hom_muts) > 0) {
+    		//hom_types = hom_muts.mutationType;
+			//hom_tags = hom_muts.mutationType.tag;
+			//is_High = (hom_tags == 1);
+    		//is_Mod  = (hom_tags == 2);
+    		//is_Low  = (hom_tags == 3);
+    		
+			s_vec = hom_muts.selectionCoeff;
+			//h_vec = hom_muts.mutationType.dominanceCoeff;
+
+			is_m13 = (hom_muts.mutationType == m13);
+			if (any(is_m13)) {
+				m13_subset = hom_muts[is_m13];
+        
+		        s_key = "s_p" + pop.id;
+        		//h_key = "h_p" + pop.id;
+        
+               	stored_s = m13_subset.getValue(s_key);
+				//stored_s = sapply(m13_subset, "v = applyValue.getValue('" + s_key + "'); if (isNULL(v)) 0.0; else v;");
+        		//stored_h = m13_subset.getValue(h_key);
+        
+        		s_vec[is_m13] = stored_s;
+        		//h_vec[is_m13] = stored_h;
+    		}
+			is_High = (s_vec <= -0.01);
+			is_Mod  = (s_vec > -0.01) & (s_vec <= -0.001);
+			is_Low  = (s_vec > -0.001) & (s_vec <= -0.00001);
+			is_Neut = (s_vec == 0.0);
+
+			hom_high = 2 * sum(is_High);
+    		hom_mod  = 2 * sum(is_Mod);
+    		hom_low  = 2 * sum(is_Low);
+       		hom_tot  = hom_high + hom_mod + hom_low;
+
+			hom_pos = hom_muts.position;
+    		hom_anc = ANC_SEQ[hom_pos];
+			
+			// A and G site
+			is_A = (hom_anc == 0); // Ancestral A
+    		is_G = (hom_anc == 2); // Ancestral G
+
+			hom_high_A = 2 * sum(is_A & is_High);
+    		hom_mod_A  = 2 * sum(is_A & is_Mod);
+    		hom_low_A  = 2 * sum(is_A & is_Low);
+			hom_tot_A  = hom_high_A + hom_mod_A + hom_low_A;
+
+			hom_high_G = 2 * sum(is_G & is_High);
+    		hom_mod_G  = 2 * sum(is_G & is_Mod);
+    		hom_low_G  = 2 * sum(is_G & is_Low);
+    		hom_tot_G  = hom_high_G + hom_mod_G + hom_low_G;
+		} else {
+    		hom_high = 0; hom_mod = 0; hom_low = 0; hom_tot = 0;
+			hom_high_A = 0; hom_mod_A = 0; hom_low_A = 0; hom_tot_A = 0;
+    		hom_high_G = 0; hom_mod_G = 0; hom_low_G = 0; hom_tot_G = 0;
+		}
+
+		if (size(uniq_muts) > 0) {
+    		//uniq_types = uniq_muts.mutationType;
+			//uniq_tags = uniq_muts.mutationType.tag;
+			//is_High = (uniq_tags == 1);
+    		//is_Mod  = (uniq_tags == 2);
+    		//is_Low  = (uniq_tags == 3);
+
+			s_vec = uniq_muts.selectionCoeff;
+			//h_vec = uniq_muts.mutationType.dominanceCoeff;
+
+			is_m13 = (uniq_muts.mutationType == m13);
+			if (any(is_m13)) {
+				m13_subset = uniq_muts[is_m13];
+        
+		        s_key = "s_p" + pop.id;
+        		//h_key = "h_p" + pop.id;
+        
+               	stored_s = m13_subset.getValue(s_key);
+				//stored_s = sapply(m13_subset, "v = applyValue.getValue('" + s_key + "'); if (isNULL(v)) 0.0; else v;");
+        		//stored_h = m13_subset.getValue(h_key);
+        
+        		s_vec[is_m13] = stored_s;
+        		//h_vec[is_m13] = stored_h;
+    		}
+			is_High = (s_vec <= -0.01);
+			is_Mod  = (s_vec > -0.01) & (s_vec <= -0.001);
+			is_Low  = (s_vec > -0.001) & (s_vec <= -0.00001);
+			is_Neut = (s_vec == 0.0);
+
+    		site_high = 2 * sum(is_High);
+			site_mod = 2 * sum(is_Mod);
+			site_low = 2 * sum(is_Low);
+    		site_tot  = site_high + site_mod + site_low;
+
+			uniq_pos = uniq_muts.position;
+    		uniq_anc = ANC_SEQ[uniq_pos];
+
+			// A and G site
+			is_A = (uniq_anc == 0);
+    		is_G = (uniq_anc == 2);
+
+			site_high_A = 2 * sum(is_A & is_High);
+    		site_mod_A  = 2 * sum(is_A & is_Mod);
+    		site_low_A  = 2 * sum(is_A & is_Low);
+    		site_tot_A  = site_high_A + site_mod_A + site_low_A; 
+
+    		site_high_G = 2 * sum(is_G & is_High);
+    		site_mod_G  = 2 * sum(is_G & is_Mod);
+    		site_low_G  = 2 * sum(is_G & is_Low);
+    		site_tot_G  = site_high_G + site_mod_G + site_low_G;
+		} else {
+    		site_high = 0; site_mod = 0; site_low = 0; site_tot = 0;
+			site_high_A = 0; site_mod_A = 0; site_low_A = 0; site_tot_A = 0;
+    		site_high_G = 0; site_mod_G = 0; site_low_G = 0; site_tot_G = 0;
+		}
+
+		LoadR_high_ind[j] = hom_high / max(1, site_high);
+    	LoadR_mod_ind[j]  = hom_mod  / max(1, site_mod);
+    	LoadR_low_ind[j]  = hom_low  / max(1, site_low);
+    	LoadR_tot_ind[j]  = hom_tot  / max(1, site_tot);
+
+		LoadR_high_ind_A[j] = hom_high_A / max(1, site_high_A);
+    	LoadR_mod_ind_A[j]  = hom_mod_A  / max(1, site_mod_A);
+    	LoadR_low_ind_A[j]  = hom_low_A  / max(1, site_low_A);
+    	LoadR_tot_ind_A[j]  = hom_tot_A  / max(1, site_tot_A);
+
+		LoadR_high_ind_G[j] = hom_high_G / max(1, site_high_G);
+    	LoadR_mod_ind_G[j]  = hom_mod_G  / max(1, site_mod_G);
+    	LoadR_low_ind_G[j]  = hom_low_G  / max(1, site_low_G);
+    	LoadR_tot_ind_G[j]  = hom_tot_G  / max(1, site_tot_G);
+	}
+
+	mean_LoadP_high = mean(LoadP_high_ind);
+	mean_LoadP_mod = mean(LoadP_mod_ind);
+	mean_LoadP_low = mean(LoadP_low_ind);
+	mean_LoadP_tot = mean(LoadP_tot_ind);
+
+	mean_LoadR_high = mean(LoadR_high_ind);
+	mean_LoadR_mod  = mean(LoadR_mod_ind);
+	mean_LoadR_low  = mean(LoadR_low_ind);
+	mean_LoadR_tot  = mean(LoadR_tot_ind);
+
+	mean_LoadP_high_A = mean(LoadP_high_ind_A);
+	mean_LoadP_mod_A = mean(LoadP_mod_ind_A);
+	mean_LoadP_low_A = mean(LoadP_low_ind_A);
+	mean_LoadP_tot_A = mean(LoadP_tot_ind_A);
+
+	mean_LoadP_high_G = mean(LoadP_high_ind_G);
+	mean_LoadP_mod_G = mean(LoadP_mod_ind_G);
+	mean_LoadP_low_G = mean(LoadP_low_ind_G);
+	mean_LoadP_tot_G = mean(LoadP_tot_ind_G);
+
+	mean_LoadR_high_A = mean(LoadR_high_ind_A);
+	mean_LoadR_mod_A = mean(LoadR_mod_ind_A);
+	mean_LoadR_low_A = mean(LoadR_low_ind_A);
+	mean_LoadR_tot_A = mean(LoadR_tot_ind_A);
+
+	mean_LoadR_high_G = mean(LoadR_high_ind_G);
+	mean_LoadR_mod_G = mean(LoadR_mod_ind_G);
+	mean_LoadR_low_G = mean(LoadR_low_ind_G);
+	mean_LoadR_tot_G = mean(LoadR_tot_ind_G);
+
+	return c(pop.individuals.size(), mean(pop.cachedFitness(NULL)), mean(ind_het), mean(ind_het_A), mean(ind_het_G), calcInbreedingLoad(pop.individuals.genomes), mean(ROH_length_sumPerInd_100Kb)/seqLength, mean(ROH_length_sumPerInd_500Kb)/seqLength, mean(ROH_length_sumPerInd_1Mb)/seqLength, mean(ROH_length_sumPerInd_10Mb)/seqLength, mean(Num_vstrDel_muts), mean(Num_strDel_muts), mean(Num_modDel_muts), mean(Num_wkDel_muts), mean(Num_vstrBen_muts), mean(Num_strBen_muts), mean(Num_modBen_muts), mean(Num_wkBen_muts), mean(Num_neut_muts), mean_LoadP_high, mean_LoadP_mod, mean_LoadP_low, mean_LoadP_tot, mean_LoadR_high, mean_LoadR_mod, mean_LoadR_low, mean_LoadR_tot, mean_LoadP_high_A, mean_LoadP_mod_A, mean_LoadP_low_A, mean_LoadP_tot_A, mean_LoadP_high_G, mean_LoadP_mod_G, mean_LoadP_low_G, mean_LoadP_tot_G, mean_LoadR_high_A, mean_LoadR_mod_A, mean_LoadR_low_A, mean_LoadR_tot_A, mean_LoadR_high_G, mean_LoadR_mod_G, mean_LoadR_low_G, mean_LoadR_tot_G);
+}
+
+
+1 first() { // p1: CTX (E9067, E9570, F1306, F1953 / F1930, F1933, F1934, F1955, F1957, F1958), p2: NM (SRR11514058, SRR11514059, SRR11514060, SRR11514061, SRR11514063, SRR11514064, SRR11514065), p3: SE MX (F1876, F1878, F1879, F1882, F1916 / F1819, F1825, F1827, F1828, F1832, F1833, F1835, F1910)
+	ancSeq = sim.chromosome.ancestralNucleotides(format="integer");
+	defineConstant("ANC_SEQ", ancSeq);
+	defineConstant("G_SITES", which(ancSeq == 2)); // 2=G to track migrants' contribution to adaptive loci
+	defineConstant("TOTAL_G_SITES", length(G_SITES));
+	defineConstant("A_SITES", which(ancSeq == 0)); // 0=A to track migrants' contribution to adaptive loci
+	defineConstant("TOTAL_A_SITES", length(A_SITES));
+	defineConstant("TOTAL_SITES", length(ancSeq));
+
+	sim.addSubpop("p1", 10);
+	sim.addSubpop("p2", 7);
+	sim.addSubpop("p3", 13);
+
+	c(p1,p2,p3).genomes.readFromVCF("monq_mcSNPSV_forSlim.cleaned.vcf", m13);
+
+	//sim.addSubpop("p0", 30);
+	//p0.genomes.readFromVCF("monq_mcSNPSV_forSlim.cleaned.vcf", m13);
+
+    //all_inds = p0.individuals;
+    //sim.addSubpop("p1", 0);
+    //p1.setSubpopulationSize(1000); // this is for WF model
+	//p1.genomes.readFromVCF("monqCTX_mcSNPSV_forSlim.vcf", m13);
+	//p1.takeMigrants(all_inds[0:9]);
+
+    //sim.addSubpop("p2", 0);
+    //p2.setSubpopulationSize(3000); // this is for WF model
+	//p2.genomes.readFromVCF("monqNM_mcSNPSV_forSlim.vcf", m13);
+	//p2.takeMigrants(all_inds[10:16]);
+
+    //sim.addSubpop("p3", 0);
+    //p3.setSubpopulationSize(5000); // this is for WF model
+	//p3.genomes.readFromVCF("monqSEMX_mcSNPSV_forSlim.vcf", m13);
+	//p3.takeMigrants(all_inds[17:29]);
+
+	//p0.removeSubpopulation();
+
+	// Assign ages to resumed individuals
+	inds = p1.individuals;
+    inds.age = 1; // 
+	
+	catn("Individual 0 of p1: age = " + inds[0].age);
+	
+	//cat("Working on post-burn generation: " + community.tick + "\n");
+	catn("Number of individuals in p1 at 'late': " + p1.individualCount);
+
+    // Assign ages to resumed individuals
+	inds = p2.individuals;
+    inds.age = 1; // 
+	
+	catn("Individual 0 of p2: age = " + inds[0].age);
+	
+	//cat("Working on post-burn generation: " + community.tick + "\n");
+	catn("Number of individuals in p2 at 'late': " + p2.individualCount);
+
+    // Assign ages to resumed individuals
+	inds = p3.individuals;
+    inds.age = 1; // 
+
+	catn("Individual 0 of p3: age = " + inds[0].age);
+	
+	//cat("Working on post-burn generation: " + community.tick + "\n");
+	catn("Number of individuals in p3 at 'late': " + p3.individualCount);
+
+	// initialize sample stats file -> proxy for tick 0
+	//line = paste0("Tick,Population,PopSize,MeanFitness,Heterozygosity,Heterozygosity_empiricalSNPSV,Heterozygosity_outlierSV,InbreedingLoad,Froh100Kb,Froh500Kb,Froh1Mb,Froh10Mb,Num_vstrDel,Num_strDel,Num_modDel,Num_wkDel,Num_vstrBen,Num_strBen,Num_modBen,Num_wkBen,Num_neut,LoadP_high,LoadP_mod,LoadP_low,LoadP_tot,LoadR_high,LoadR_mod,LoadR_low,LoadR_tot\n");
+	//writeFile(STATS, line, append=F);
+	//stats = getStats(p1, sampleSize);
+	//line2 = paste0(community.tick + "," + "p1" + "," + stats);
+	//cat(line2);
+	//writeFile(STATS, line2, append=T);
+	//catn("Stats file written to " + STATS);
+
+	// set up logging
+	//log = community.createLogFile(OUTBASE + "slim_rescue_preburnin.log", logInterval=1);
+	//log.addTick();
+	//log.addSubpopulationSize(p1);
+	//log.addCustomColumn('mean_fitness', 'mean(p1.cachedFitness(NULL));');
+	//log.addCustomColumn('mean_load', 'calcInbreedingLoad(p1.individuals.genomes);');
+	//log.addCustomColumn('mean_exp_het', 'calcHeterozygosity(p1.genomes);');
+	//log.addCustomColumn('pi', 'calcPi(p1.individuals.genomes);');
+	//log.addCustomColumn('allele_freq', 'return exists("MUT") ? sim.mutationFrequencies(NULL, MUT) else NULL;');
+	//log.addCustomColumn('mean_offspring', 'mean(p1.lifetimeReproductiveOutput);');
+	//log.addCustomColumn('mean_age', 'mean(p1.individuals.age);');
+
+	// initialize sample stats file
+	log = community.createLogFile(OUTBASE + "slim_rescue_preburnin.stats", logInterval=1); 
+	log.addTick();
+
+	log.addCustomColumn("pop_size",       "p1.getValue('stats')[0];");
+    log.addCustomColumn("mean_fitness",   "p1.getValue('stats')[1];");
+    log.addCustomColumn("mean_het",       "p1.getValue('stats')[2];");
+    log.addCustomColumn("mean_het_A",     "p1.getValue('stats')[3];");
+    log.addCustomColumn("mean_het_G",     "p1.getValue('stats')[4];");
+    log.addCustomColumn("inbreeding_load","p1.getValue('stats')[5];");
+    
+    // ROH
+    log.addCustomColumn("ROH_100Kb",      "p1.getValue('stats')[6];");
+    log.addCustomColumn("ROH_500Kb",      "p1.getValue('stats')[7];");
+    log.addCustomColumn("ROH_1Mb",        "p1.getValue('stats')[8];");
+    log.addCustomColumn("ROH_10Mb",       "p1.getValue('stats')[9];");
+
+    // Mutation Counts
+    log.addCustomColumn("Num_vstrDel",    "p1.getValue('stats')[10];");
+    log.addCustomColumn("Num_strDel",     "p1.getValue('stats')[11];");
+    log.addCustomColumn("Num_modDel",     "p1.getValue('stats')[12];");
+    log.addCustomColumn("Num_wkDel",      "p1.getValue('stats')[13];");
+    log.addCustomColumn("Num_vstrBen",    "p1.getValue('stats')[14];");
+    log.addCustomColumn("Num_strBen",     "p1.getValue('stats')[15];");
+    log.addCustomColumn("Num_modBen",     "p1.getValue('stats')[16];");
+    log.addCustomColumn("Num_wkBen",      "p1.getValue('stats')[17];");
+	log.addCustomColumn("Num_neut_muts",  "p1.getValue('stats')[18];");
+
+    // Load P
+    log.addCustomColumn("LoadP_high",     "p1.getValue('stats')[19];");
+    log.addCustomColumn("LoadP_mod",      "p1.getValue('stats')[20];");
+    log.addCustomColumn("LoadP_low",      "p1.getValue('stats')[21];");
+    log.addCustomColumn("LoadP_tot",      "p1.getValue('stats')[22];");
+
+    // Load R
+    log.addCustomColumn("LoadR_high",     "p1.getValue('stats')[23];");
+    log.addCustomColumn("LoadR_mod",      "p1.getValue('stats')[24];");
+    log.addCustomColumn("LoadR_low",      "p1.getValue('stats')[25];");
+    log.addCustomColumn("LoadR_tot",      "p1.getValue('stats')[26];");
+
+	// Load P on A sites
+	log.addCustomColumn("LoadP_high_A",     "p1.getValue('stats')[27];");
+    log.addCustomColumn("LoadP_mod_A",      "p1.getValue('stats')[28];");
+    log.addCustomColumn("LoadP_low_A",      "p1.getValue('stats')[29];");
+    log.addCustomColumn("LoadP_tot_A",      "p1.getValue('stats')[30];");
+
+	// Load P on G sites
+	log.addCustomColumn("LoadP_high_G",     "p1.getValue('stats')[31];");
+    log.addCustomColumn("LoadP_mod_G",      "p1.getValue('stats')[32];");
+    log.addCustomColumn("LoadP_low_G",      "p1.getValue('stats')[33];");
+    log.addCustomColumn("LoadP_tot_G",      "p1.getValue('stats')[34];");
+
+	// Load R on A sites
+	log.addCustomColumn("LoadR_high_A",     "p1.getValue('stats')[35];");
+    log.addCustomColumn("LoadR_mod_A",      "p1.getValue('stats')[36];");
+    log.addCustomColumn("LoadR_low_A",      "p1.getValue('stats')[37];");
+    log.addCustomColumn("LoadR_tot_A",      "p1.getValue('stats')[38];");
+
+	// Load R on G sites
+	log.addCustomColumn("LoadR_high_G",     "p1.getValue('stats')[39];");
+    log.addCustomColumn("LoadR_mod_G",      "p1.getValue('stats')[40];");
+    log.addCustomColumn("LoadR_low_G",      "p1.getValue('stats')[41];");
+    log.addCustomColumn("LoadR_tot_G",      "p1.getValue('stats')[42];");
+
+	log.addCustomColumn('mean_age', 'mean(p1.individuals.age);');
+	
+	// calculate stats
+	//current_stats = getStats(p1, sampleSize);
+	//p1.setValue("stats", current_stats);
+}
+
+early() {
+	catn("Entered early() at " + community.tick);
+
+	inds = p1.individuals;
+	ages = inds.age;
+	catn("Number of individuals in p1 after 'early' assignment: " + p1.individualCount);
+
+	// age-dependent mortality
+	mortality = L[ages];
+	survival = 1 - mortality;
+
+	inds.fitnessScaling = survival * K_p1 / p1.individualCount;
+	inds_to_kill = inds[inds.age >= 3];  // make sure individuals at age 3 defined
+	if (size(inds_to_kill) > 0) {
+        inds_to_kill.fitnessScaling = 0.0; // Reduce fitness to 0
+    }
+
+	indLen = pmin(4, p1.individualCount);
+	for (i in 0:indLen) {
+    catn("GEN = " + community.tick + " | Individual " + i + "of p1's fitnessScaling =  " + inds[i].fitnessScaling);
+	}
+
+    inds = p2.individuals;
+	ages = inds.age;
+	catn("Number of individuals in p2 after 'early' assignment: " + p2.individualCount);
+
+	// age-dependent mortality
+	mortality = L[ages];
+	survival = 1 - mortality;
+
+	inds.fitnessScaling = survival * K_p2 / p2.individualCount;
+	inds_to_kill = inds[inds.age >= 3];  // make sure individuals at age 3 defined
+	if (size(inds_to_kill) > 0) {
+        inds_to_kill.fitnessScaling = 0.0; // Reduce fitness to 0
+    }
+
+	indLen = pmin(4, p2.individualCount);
+	for (i in 0:indLen) {
+    catn("GEN = " + community.tick + " | Individual " + i + "of p2's fitnessScaling =  " + inds[i].fitnessScaling);
+	}
+
+    inds = p3.individuals;
+	ages = inds.age;
+	catn("Number of individuals in p3 after 'early' assignment: " + p3.individualCount);
+
+	// age-dependent mortality
+	mortality = L[ages];
+	survival = 1 - mortality;
+
+	inds.fitnessScaling = survival * K_p3 / p3.individualCount;
+	inds_to_kill = inds[inds.age >= 3];  // make sure individuals at age 3 defined
+	if (size(inds_to_kill) > 0) {
+        inds_to_kill.fitnessScaling = 0.0; // Reduce fitness to 0
+    }
+
+	indLen = pmin(4, p3.individualCount);
+	for (i in 0:indLen) {
+    catn("GEN = " + community.tick + " | Individual " + i + "of p3's fitnessScaling =  " + inds[i].fitnessScaling);
+	}
+}
+
+BURNIN late() {
+	current_stats = getStats(p1, sampleSize);
+	p1.setValue("stats", current_stats);
+	sim.outputFull(OUTBASE + "rescue_burnin.slim", T);	
+	sim.treeSeqOutput(OUTBASE + "rescue_burnin.trees");
+	catn(".slim and .trees have been generated.");
+}
+
+late() {
+	//stats = getStats(p1, sampleSize);
+	//line = paste0(community.tick + "," + "p1" + "," + stats);
+	//catn(line);
+	//writeFile(STATS, line, append=T);
+
+	if (community.tick % 5 ==0) {
+		current_stats = getStats(p1, sampleSize);
+		p1.setValue("stats", current_stats);
+	}
+
+	if (community.tick % 1000 == 0) {
+    	sim.outputFull(OUTBASE + "rescue" + community.tick + ".slim", T);
+		sim.treeSeqOutput(OUTBASE + "rescue" + community.tick + ".trees");
+	}
+}
+
+early() {
+	if (p1.individualCount >= K_p1 & p2.individualCount >= K_p2 & p3.individualCount >= K_p3) {
+		sim.outputFull(OUTBASE + "rescue_burnin.slim", T);
+		sim.treeSeqOutput(OUTBASE + "rescue_burnin.trees");
+		catn(".slim and .trees have been generated.");
+		sim.simulationFinished();
+	}
+	if (p1.individualCount == 0) {
+		catn("Population went extinct! Ending the simulation.");
+		sim.simulationFinished();
+	}
+}
+
+reproduction() {
+	catn("Entered reproduction() at " + community.tick);
+
+	for (current_subpop in sim.subpopulations) {
+
+		// Sample potential mates
+		females = current_subpop.individuals[current_subpop.individuals.sex == "F" & current_subpop.individuals.age >= 1];
+		males = current_subpop.individuals[current_subpop.individuals.sex == "M" & current_subpop.individuals.age >= 1];
+
+		for (female in females) {
+			mates = sample(males, rpois(1,1), replace = F);
+	
+		// mating process
+			for (mate in mates) {
+				if (!isNULL(mate)) {
+					// after map added/changed, the introduced mutation affects fecundity
+					nOff = rpois(1, 2 * FECUN);
+					}
+					current_subpop.addCrossed(female, mate, count = nOff);  // Create offspring
+    	    }
+		}
+	}
+	self.active = 0;
+}
+
+BURNIN late() {
+	catn("End of simulation (run time reached)");
+	sim.simulationFinished();
+}
+
+
+function (void)setupParams(object<Dictionary>$ defaults)
+{
+	if (!exists("PARAMFILE")) defineConstant("PARAMFILE", "./params.json");
+	if (!exists("OUTDIR")) defineConstant("OUTDIR", ".");
+	defaults.addKeysAndValuesFrom(Dictionary("PARAMFILE", PARAMFILE, "OUTDIR", OUTDIR));
+	
+	if (fileExists(PARAMFILE)){
+		defaults.addKeysAndValuesFrom(Dictionary(readFile(PARAMFILE)));
+		defaults.setValue("READ_FROM_PARAMFILE", PARAMFILE);
+	}
+	
+	//defaults.setValue("OUTBASE", OUTDIR + "/out_" +	defaults.getValue("seed"));
+	//defaults.setValue("OUTPATH", defaults.getValue("OUTBASE") + ".trees");
+	
+	for (k in defaults.allKeys) {
+		if (!exists(k))
+			defineConstant(k, defaults.getValue(k));
+		else
+			defaults.setValue(k, executeLambda(paste(c(k, ";"), sep='')));
+	}
+	
+	// print out default values
+	catn("===========================");
+	catn("Model constants: " + defaults.serialize("pretty"));
+	catn("===========================");
+}
