@@ -1,0 +1,36 @@
+MONQ ENM
+
+1. GBIF, iNat data collection (1970~2024; avg = 2014) (R)
+	- see R script
+2. Combine in-lab data (manual)
+3. Remove outlying data points outside of the putative range (ArcGIS)
+4. Buffer data points (geodesic) (ArcGIS)
+	- 500 km (5km * 100 years), 150km (5km * 30 years), 300km (5km * 60 years), 450km (5km * 90 years) (, and at the very end; minimum convex hull -> 5km (5km * 1 year == present))
+5. Clip by "combined_land" shape file (ArcGIS)
+6.1. DEM (SRTM1; Shuttle Radar Topography Mission, 30m-resolution) downloaded from USGS (manual)
+6.2. Bioclim+ variables (~1km-resolution) downloaded from CHELSA for the present, future (~+2100), and past (~-21000 interval of 5k) (manual)
+7. Clip DEM using the buffered points or template polygons (corresponding to each future and past period) (ArcGIS)
+8. Aspect and Slope from DEM (ArcGIS)
+9. Resample Aspect and Slope according to CHELSA data (1-km resolution) (ArcGIS)
+10. Spatial correlation -> uncorrelated: bio2, bio5, bio7, bio8, bio9, bio14, bio15, bio18, *scd, *swe, *fcf, *fgd, **gsp, aspect, slope (ArcGIS)
+11. Clip uncorrelated variables by buffered polygons of 150km (5km * 30 years), 300km (5km * 60 years), and 450km (5km * 90 years) (ArcGIS)
+12. Spatial thin occurrence points (0.5 kilometers; conservative than Stromberg 1990) (ArcGIS)
+13. Generate a bias layer (Gaussian kernel density; 0.25 degrees) (ArcGIS)
+14. Run and compare diverse modeling algorithms in biomod2 -> random forest (R)
+15. Generate a model and project into the future/past (R)
+
+With CHELSA -> since 21000, bioclim + aspect, slope; 5k intervals
+
+16. Interpolate (IDW) NA areas of present and future periods # For ENMs from Audrey, need to extract the rasters using one of the topo variables of the corresponding period first
+(raster to points, IDW with default parameters snapping rasters using the original) (ArcGIS)
+17. Extract by Mask with the buffered template to remove non-needed outer areas (ArcGIS)
+18. Re-extract "outside" using the original to keep original NA areas only; extract once more using the buffered template to remove non-needed outer areas) (ArcGIS)
+19. Merge the original and interpolated rasters (Mosaic to a New Raster) (ArcGIS)
+20. "Aggregate" rasters to reduce the resolution by a factor of 10 (Maximum) for computationally tractable simulations (ArcGIS)
+21. Expand all final rasters to the maximum extent among them, which is about (-117.0085, -93.30847, 15.63319, 39.36653) and Convert NA values to 0, Scale 0-1000 to 0-1 using Raster Calculator (ArcGIS)
+22. Project the outputs of step 21 to Projected Coordinate System (Bilinear for "suit"; North America Albers Equal Area Conic) (do further Extract by Mask as needed) -> Save to png (8 Bit Unsigned, Scale Pixel Value) (ArcGIS)
+23. Expand the projected raster to a rectangle using Raster Calculater (convert NA values to 0, keep non-NA values as-is) (do further Extract by Mask as needed) -> Save to tif (ArcGIS)
+24. Make a land raster layer by converting NA values to 0 and non-NA values to 1 using Raster Calculator (ArcGIS)
+25. Project the outputs of step 21 to Projected Coordinate System (Nearest Neighbor for "land"; North America Albers Equal Area Conic) (do further Extract by Mask as needed) -> Save to png (8 Bit Unsigned, Scale Pixel Value) (ArcGIS)
+#26. Expand the projected raster to a rectangle using Raster Calculater (convert NA values to 0, keep non-NA values as-is) (ArcGIS)
+#27. Make a binary availability layer by converting values >= 0.13 (Greene, 2013) to 1 and the others to 0 using Raster Calculator (ArcGIS)
