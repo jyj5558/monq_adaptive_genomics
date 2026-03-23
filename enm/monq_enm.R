@@ -527,46 +527,6 @@ for (year in c("2040","2070","2100")){
   }
 } 
 
-for (year in c("minus0","minus50","minus100","minus150","minus200")){
-  for (scen in c("paleo")) {
-    envs_files.name <- paste(year,scen,"envs", sep="_")
-    assign(envs_files.name, list.files(path = paste0(year,"_processed"), pattern = ".tif$", full.names=TRUE))
-    envs_stack.name <- paste0(year,"_",scen,"_envs",".stack")
-    assign(envs_stack.name, stack(get(envs_files.name)))
-    envs_stack <- get(envs_stack.name)
-    envs_stack <- setMinMax(envs_stack)
-    envs_stack
-    new_env_names <- c("aspect", "bio14", "bio15", "bio18", "bio2", "bio5", "bio7", "bio8", "bio9", "slope") # alphabetically ordered
-    print(envs_stack)
-    names(envs_stack) <- new_env_names
-    print(envs_stack)
-    sngl.name <- paste0("monq_rf_proj_",year,"_",scen)
-    assign(sngl.name, BIOMOD_Projection(
-      bm.mod = monq_rf,
-      models.chosen = "all",
-      new.env = envs_stack,
-      proj.name = paste0("monq_",year,"_",scen),
-      metric.binary = "all",
-      output.format = ".tif",
-      do.stack = FALSE
-    ))
-    esmbl.name <- paste0("monq_rf_ensemble_proj_",year,"_",scen)
-    assign(esmbl.name, BIOMOD_EnsembleForecasting(
-      bm.em = monq_rf_ensemble,
-      models.chosen = "all",
-      bm.proj = get(sngl.name),
-      metric.binary = "all",
-      output.format = ".tif",
-      do.stack = FALSE,
-      nb.cpu = 120
-    ))
-    pred_file.name <- paste0(paste("monq_rf_ensemble",year,scen, sep="_"),".pred")
-    assign(pred_file.name, get_predictions(get(esmbl.name)))
-    pred.bin_file.name <- paste0(paste("monq_rf_ensemble",year,scen, sep="_"),".pred.bin")
-    assign(pred.bin_file.name, get_predictions(get(esmbl.name), metric.binary = "TSS"))
-  }
-} 
-
 # Plotting -> in ArcGIS
 custom_palette <- colorRampPalette(c("#FFD966", "#00A600"))
 zlim <- c(0, 1)
@@ -616,36 +576,6 @@ extent(suit_2100)
 #ymin       : 15.65819 
 #ymax       : 38.91653 
 #suit_minus0 <- raster("monq/models/minus0/individual_projections/monq_EMwmeanByTSS_mergedData_mergedRun_mergedAlgo.tif")
-extent(suit_minus0)
-#xmin       : -117.0085 
-#xmax       : -93.37514 
-#ymin       : 15.63319 
-#ymax       : 39.36653
-#suit_minus50 <- raster("monq/models/minus50/individual_projections/monq_EMwmeanByTSS_mergedData_mergedRun_mergedAlgo.tif")
-extent(suit_minus50)
-#xmin       : -117.0085 
-#xmax       : -93.37514 
-#ymin       : 15.63319 
-#ymax       : 39.36653
-#suit_minus100 <- raster("monq/models/minus100/individual_projections/monq_EMwmeanByTSS_mergedData_mergedRun_mergedAlgo.tif")
-extent(suit_minus100)
-#xmin       : -117.0085 
-#xmax       : -93.31681 
-#ymin       : 15.63319 
-#ymax       : 39.36653 
-#suit_minus150 <- raster("monq/models/minus150/individual_projections/monq_EMwmeanByTSS_mergedData_mergedRun_mergedAlgo.tif")
-extent(suit_minus150)
-#xmin       : -117.0085 
-#xmax       : -93.30847 
-#ymin       : 15.63319 
-#ymax       : 39.36653
-#suit_minus200 <- raster("monq/models/minus200/individual_projections/monq_EMwmeanByTSS_mergedData_mergedRun_mergedAlgo.tif")
-extent(suit_minus200)
-#xmin       : -117.0085 
-#xmax       : -93.30847 
-#ymin       : 15.63319 
-#ymax       : 39.36653 
-# min(xmin): -117.0085, max(xmax): -93.30847, min(ymin): 15.63319, max(ymax): 39.36653
 
 # below was not run (interpolation was done in ArcGIS)
 for (year in c("present", "2040", "2070", "2100")){
@@ -690,19 +620,7 @@ setwd("D:/Research_Data_Backup/Montezuma_quail/enm/monq_enm_gis")
 #  writeRaster(scaled_raster, paste0("MonqSuit_",year,"_final.tif"), format = "GTiff", overwrite = TRUE)
 #}
 
-#for (year in c("minus0", "minus50", "minus100", "minus150", "minus200")){
-#  original_raster <- get(paste0("suit_",year))
-#  no_na_raster <- calc(original_raster, fun = function(x) { ifelse(is.na(x), 0, x) })
-#  filled_raster <- extend(no_na_raster, rect_extent, value = 0)
-#  scaled_raster <- filled_raster / 1000
-#  plot(original_raster)
-#  plot(no_na_raster)
-#  plot(filled_raster)
-#  plot(scaled_raster)
-#  writeRaster(scaled_raster, paste0("MonqSuit_",year,"_final.tif"), format = "GTiff", overwrite = TRUE)
-#}
-
-#for (year in c("present", "2040", "2070", "2100", "minus0", "minus50", "minus100", "minus150", "minus200")){
+#for (year in c("present", "2040", "2070", "2100")){
 #  original_raster <- raster(paste0("MonqSuit_",year,"_final.tif"))
 #  onezero_raster <- calc(original_raster, fun = function(x) { ifelse(x > 0, 1, 0) })
 #  land_raster <- extend(onezero_raster, rect_extent, value = 0)
@@ -712,26 +630,12 @@ setwd("D:/Research_Data_Backup/Montezuma_quail/enm/monq_enm_gis")
 #  writeRaster(land_raster, paste0("MonqLand_",year,"_final.tif"), format = "GTiff", overwrite = TRUE)
 #}
 
-for (year in c("present", "2040", "2070", "2100", "minus0", "minus50", "minus100", "minus150", "minus200")){
+for (year in c("present", "2040", "2070", "2100")){
   original_raster <- raster(paste0("suit_",year,"_res10.tif"))
   print(extent(original_raster))
 }
 
 rect_extent <- extent(-117.0085, -93.34181, 15.63319, 39.36653)
-
-for (year in c("minus0", "minus50", "minus100", "minus150", "minus200")){
-  original_raster <- raster(paste0("suit_",year,"_res10.tif"))
-  no_na_raster <- calc(original_raster, fun = function(x) { ifelse(is.na(x), 0, x) })
-  aligned_extent <- alignExtent(rect_extent, no_na_raster, snap = "out") # this should be the same for these layers
-  filled_raster <- extend(no_na_raster, aligned_extent, value = 0)
-  scaled_raster <- filled_raster / 1000
-  print(scaled_raster)
-  plot(original_raster)
-  plot(no_na_raster)
-  plot(filled_raster)
-  plot(scaled_raster)
-  writeRaster(scaled_raster, paste0("D:/Research_Data_Backup/Montezuma_quail/enm/monq_enm_R/","MonqSuit_",year,"_final_res10.tif"), format = "GTiff", overwrite = TRUE)
-}
 
 for (year in c("present", "2040", "2070", "2100")){
   original_raster <- raster(paste0("suit_",year,"_res10.tif"))
@@ -746,7 +650,7 @@ for (year in c("present", "2040", "2070", "2100")){
   writeRaster(scaled_raster, paste0("D:/Research_Data_Backup/Montezuma_quail/enm/monq_enm_R/","MonqSuit_",year,"_final_res10.tif"), format = "GTiff", overwrite = TRUE)
 }
 
-for (year in c("present", "2040", "2070", "2100", "minus0", "minus50", "minus100", "minus150", "minus200")){
+for (year in c("present", "2040", "2070", "2100")){
   original_raster <- raster(paste0("suit_",year,"_res10.tif"))
   onezero_raster <- calc(original_raster, fun = function(x) { ifelse(is.na(x), 0, 1) })
   land_raster <- extend(onezero_raster, rect_extent, value = 0)
