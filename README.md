@@ -64,7 +64,7 @@ monq_adaptive_genomics/
 
 Contains scripts for assembling individual-level genomes and constructing the Montezuma quail pangenome.
 
-Long-read (PacBio HiFi) assemblies are generated for ten individuals using `hifiasm` by `monq_longread_assembly.sh`, duplicate haplotypes are removed using `purge_dups`, and assembled contigs are screened for contamination with Kraken2 (`monq_longread_kraken2.sh`). The resulting assemblies, after renaming and repeat-masking (described in a separate pipeline), are used to build the pangenome using the Minigraph-Cactus workflow (`monq_pangenome_assembly.sh`). The final pangenome graph (`.gfa` / `.vg`) serves as the reference for short-read variant calling in the `analysis/` folder (`monq_vg.sh`).
+Long-read (PacBio HiFi) assemblies are generated for ten individuals using `hifiasm` by `monq_longread_assembly.sh`, duplicate haplotypes are removed using `purge_dups`, and assembled contigs are screened for contamination with Kraken2 (`monq_longread_kraken2.sh`). The resulting assemblies, after renaming and repeat-masking, are used to build the pangenome using the Minigraph-Cactus workflow (`monq_pangenome_assembly.sh`). The final pangenome graph (`.gfa` / `.vg`) serves as the reference for short-read variant calling in the `analysis/` folder (`monq_vg.sh`).
 
 ---
 
